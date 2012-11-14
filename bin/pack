@@ -17,6 +17,7 @@ var package = require('../package.json')
  */
 program
   .version(package.version)
+  .usage('[options] [pages]')
   .option('-v, --verbose', 'verbose output')
   .parse(process.argv);
 
@@ -28,9 +29,7 @@ var cwd = process.cwd();
 try {
   var cfg = require(path.join(cwd + '/config'));
 } catch (err) {
-  console.error();
-  console.error("  error: cannot find config file");
-  console.error();
+  console.error(" error: cannot find config file");
   process.exit(1);
 }
 
@@ -47,19 +46,17 @@ var tick = '\033[32m✓\033[39m';
   var tempDir = path.join(cfg.TEMPS_ROOT, now);
   var distDir = path.join(cfg.DISTS_ROOT, now);
   
-  var distMap;
-
   async.waterfall([
     function(cb) {
       createDir(tempDir, cb);
     },
     function(cb) {
-      log('  %s created temp directory \033[90m%s\033[39m', tick, tempDir);
+      log('  %s created temp directory \t \033[90m%s\033[39m', tick, tempDir);
 
       createDir(distDir, cb);
     },
     function(cb) {
-      log('  %s created dist directory \033[90m%s\033[39m', tick, distDir);
+      log('  %s created dist directory \t \033[90m%s\033[39m', tick, distDir);
 
       getExistingPages(cb);
     },
@@ -69,17 +66,15 @@ var tick = '\033[32m✓\033[39m';
     function(map, cb) {
       log(' finalizing:');
 
-      distMap = map;
+      createAssetsMapFile(map, distDir, cb);
+    },
+    function(cb) {
+      log('  %s created assets map file \033[90m%s\033[39m', tick, cfg.MAP_FILE);
 
       moveFilesToDist(tempDir, distDir, cb);
     },
     function(cb) {
       log('  %s moved files to the dist directory \033[90m%s\033[39m', tick, distDir);
-
-      createAssetsMapFile(distMap, distDir, cb);
-    },
-    function(cb) {
-      log('  %s created assets map file \033[90m%s\033[39m', tick, cfg.MAP_FILE);
 
       removeDir(tempDir, cb);
     }
@@ -177,8 +172,8 @@ function buildCssDist(page, group, dir, cb) {
       stat && falog('compiled *.less files\t', stat);
       buildSprites(dist, cb);
     },
-    function(cb) {
-      falog('built sprites with Tailor\t', {size: 0});
+    function(stat, cb) {
+      stat&& falog('built sprites with Tailor\t', stat);
       optimizeCSS(dist, cb);
     },
     function(stat, cb) {
@@ -382,7 +377,10 @@ function buildSprites(file, cb) {
   tailor([file], {
     rootDirPath: cfg.STATIC_ROOT
   , outDirPath: path.dirname(file)
-  }, cb);
+  }, function(err) {
+    if (err) return cb(err);
+    fs.stat(file, cb);
+  });
 }
 
 /*
