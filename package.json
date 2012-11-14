@@ -1,0 +1,18 @@
+{
+  "name": "front",
+  "version": "0.0.1",
+  "description": "Infrostructure for the frontend development",
+  "author": "Serge Borbit <serge.borbit@gmail.com>",
+  "dependencies": {
+    "enhance-css": "*",
+    "commander": "1.x",
+    "uglify-js": "1.x",
+    "sprintf": "0.x",
+    "lodash": "0.x",
+    "rimraf": "2.x",
+    "tailor": "*",
+    "async": "0.x",
+    "less": "1.x",
+    "csso": "*"
+  }
+}

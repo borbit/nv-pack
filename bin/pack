@@ -1,0 +1,660 @@
+#!/usr/bin/env node
+
+/**
+ * Module dependencies.
+ */
+var package = require('../package.json')
+  , sprintf = require('sprintf').sprintf
+  , program = require('commander')
+  , rimraf = require('rimraf')
+  , async = require('async')
+  , path = require('path')
+  , _ = require('lodash')
+  , fs = require('fs');
+
+/**
+ * CLI
+ */
+program
+  .version(package.version)
+  .option('-v, --verbose', 'verbose output')
+  .parse(process.argv);
+
+var cwd = process.cwd();
+
+/**
+ * Config
+ */
+try {
+  var cfg = require(path.join(cwd + '/config'));
+} catch (err) {
+  console.error();
+  console.error("  error: cannot find config file");
+  console.error();
+  process.exit(1);
+}
+
+var tick = '\033[32m✓\033[39m';
+
+/**
+ * Pack
+ */
+(function() {
+  log(' preparing:');
+
+  var now = Date.now().toString();
+
+  var tempDir = path.join(cfg.TEMPS_ROOT, now);
+  var distDir = path.join(cfg.DISTS_ROOT, now);
+  
+  var distMap;
+
+  async.waterfall([
+    function(cb) {
+      createDir(tempDir, cb);
+    },
+    function(cb) {
+      log('  %s created temp directory \033[90m%s\033[39m', tick, tempDir);
+
+      createDir(distDir, cb);
+    },
+    function(cb) {
+      log('  %s created dist directory \033[90m%s\033[39m', tick, distDir);
+
+      getExistingPages(cb);
+    },
+    function(pages, cb) {
+      buildPagesDist(pages.concat('cmn'), tempDir, cb);
+    },
+    function(map, cb) {
+      log(' finalizing:');
+
+      distMap = map;
+
+      moveFilesToDist(tempDir, distDir, cb);
+    },
+    function(cb) {
+      log('  %s moved files to the dist directory \033[90m%s\033[39m', tick, distDir);
+
+      createAssetsMapFile(distMap, distDir, cb);
+    },
+    function(cb) {
+      log('  %s created assets map file \033[90m%s\033[39m', tick, cfg.MAP_FILE);
+
+      removeDir(tempDir, cb);
+    }
+  ], function(err) {
+    if (err) throw err;
+
+    log('  %s removed tmp directory  \033[90m%s\033[39m', tick, tempDir);
+    log(' done!');
+  });
+
+})();
+
+/*
+ *
+ */
+function buildPageDist(page, groups, dir, cb) {
+  log(' packing %s:', page);
+
+  var res = {css: {}, js: {}};
+
+  async.series([
+    function(cb) {
+      async.forEachSeries(groups.css, function(group, cb) {
+        log('  css %s', group);
+        buildCssDist(page, group, dir, function(err, files) {
+          if (err) return cb(err);
+          if (files.length) res.css[group] = files;
+          cb();
+        });
+      }, cb);
+    },
+    function(cb) {
+      async.forEachSeries(groups.js, function(group, cb) {
+        log('  js %s', group);
+        buildJSDist(page, group, dir, function(err, files) {
+          if (err) return cb(err);
+          if (files.length) res.js[group] = files;
+          cb();
+        });
+      }, cb);
+    }
+  ], function(err) {
+    if (err) return cb(err);
+    cb(null, res);
+  });
+}
+
+/*
+ *
+ */
+function buildPagesDist(pages, dir, cb) {
+  var map = {};
+  var groups = {
+    css : ['base', 'ie7', 'ie8', 'ie9'],
+    js  : ['base', 'ie7', 'ie8', 'ie9']
+  };
+
+  async.forEachSeries(pages, function(page, cb) {
+    buildPageDist(page, groups, dir, function(err, files) {
+      map[page] = files;
+      cb(err);
+    });
+  }, function(err) {
+    if (err) return cb(err);
+    cb(null, map);
+  });
+}
+
+/*
+ *
+ */
+function buildCssDist(page, group, dir, cb) {
+  var dist = path.join(dir, getCSSDistName(page, group));
+  var gz = path.join(dir, getCSSDistGzName(page, group));
+
+  var srcs = getSources(page)
+    , csses = srcs['css_' + group]
+    , lesses = srcs['less_' + group];
+
+  if ((!csses || !csses.length) &&
+      (!lesses || !lesses.length)) {
+    log('   \033[90m✘ nothing to build here\033[39m');
+    return cb(null, []);
+  }
+
+  async.waterfall([
+    function(cb) {
+      collectCss(csses, dist, cb);
+    },
+    function(stat, cb) {
+      stat && falog('concatted *.css files\t', stat);
+      compileLess(lesses, srcs.includes, dist, cb);
+    },
+    function(stat, cb) {
+      stat && falog('compiled *.less files\t', stat);
+      buildSprites(dist, cb);
+    },
+    function(cb) {
+      falog('built sprites with Tailor\t', {size: 0});
+      optimizeCSS(dist, cb);
+    },
+    function(stat, cb) {
+      stat && falog('optimized with CSSO\t', stat);
+      embedBase64(dist, cb);
+    },
+    function(stat, cb) {
+      stat && falog('embedded images\t\t', stat);
+      gzip(dist, gz, cb);
+    },
+    function(stat, cb) {
+      stat && falog('gzipped\t\t\t', stat);
+      cb(null, [dist, gz]);
+    }
+  ], cb);
+}
+
+/*
+ *
+ */
+function buildJSDist(page, group, dir, cb) {
+  var dist = path.join(dir, getJSDistName(page, group));
+  var gz = path.join(dir, getJSDistGzName(page, group));
+
+  var srcs = getSources(page);
+  var jses = srcs['js_' + group];
+
+  if (!jses || !jses.length) {
+    log('   \033[90m✘ nothing to build here\033[39m');
+    return cb(null, []);
+  }
+
+  async.waterfall([
+    function(cb) {
+      collectJS(jses, dist, cb);
+    },
+    function(stat, cb) {
+      falog('concatted *.js files\t', stat);
+      compressJS(dist, cb);
+    },
+    function(stat, cb) {
+      falog('compressed with UglifyJS\t', stat);
+      gzip(dist, gz, cb);
+    },
+    function(stat, cb) {
+      falog('gzipped\t\t\t', stat);
+      cb(null, [dist, gz]);
+    }
+  ], cb);
+}
+
+/*
+ *
+ */
+function createAssetsMapFile(distMap, distDir, cb) {
+  var result = {};
+
+  _.each(distMap, function(assets, page) {
+    var css = {}, js = {};
+
+    _.each(_.keys(assets.css), function(group) {
+      css[group] = getCSSDistName(page, group);
+    });
+    _.each(_.keys(assets.js), function(group) {
+      js[group] = getJSDistName(page, group);
+    });
+
+    result[page] = {};
+
+    if (_.size(css))
+      result[page].css = css;
+    if (_.size(js))
+      result[page].js = js;
+  });
+
+  // TODO: Tmp solution for moving asset config out of site_media dir
+  fs.writeFile(cfg.MAP_FILE, JSON.stringify(result), cb);
+}
+
+/*
+ *
+ */
+function collectJS(files, dist, cb) {
+  files = _.map(files, function(file) {
+    return cfg.STATIC_ROOT + '/' + file;
+  });
+
+  async.waterfall([
+    function(cb) {
+      concatFiles(files, cb);
+    },
+    function(css, cb) {
+      appendFile(dist, css, cb);
+    }
+  ], cb);
+}
+
+/*
+ *
+ */
+function compressJS(file, cb) {
+  var jsp = require("uglify-js").parser;
+  var pro = require("uglify-js").uglify;
+
+  async.waterfall([
+    function(cb) {
+      readFile(file, cb);
+    },
+    function(cont, cb) {
+      var ast = jsp.parse(cont);
+      
+      ast = pro.ast_mangle(ast);
+      ast = pro.ast_squeeze(ast);
+
+      writeFile(file, pro.gen_code(ast), cb);
+    }
+  ], cb);
+}
+
+/*
+ *
+ */
+function collectCss(files, dist, cb) {
+  if (!files || !files.length) {
+    return cb(null, null);
+  }
+  
+  files = _.map(files, function(file) {
+    return cfg.STATIC_ROOT + '/' + file;
+  });
+
+  async.waterfall([
+    function(cb) {
+      concatFiles(files, cb);
+    },
+    function(css, cb) {
+      appendFile(dist, css, cb);
+    }
+  ], cb);
+}
+
+/*
+ *
+ */
+function compileLess(lesses, inclds, dist, cb) {
+  if (!lesses || !lesses.length)
+    return cb(null, null);
+
+  var dir = cfg.STATIC_ROOT + '/';
+  var files = [];
+  
+  files = files.concat(inclds || []);
+  files = files.concat(lesses);
+
+  var less = require('less');
+
+  async.waterfall([
+    function(cb) {
+      // Cancat all less files before rendering and patch
+      // all the image urls to be relative to the static dir
+      async.concatSeries(files, function(file, cb) {
+        readFile(dir + file, function(err, cont) {
+          if (err) return cb(err);
+          var sub = 'background-image: url("';
+          var rep = 'background-image: url("' + path.dirname(file) + '/';
+          cb(null, cont.split(sub).join(rep));
+        });
+      }, cb);
+    },
+    function(cont, cb) {
+      less.render(cont.join(''), cb);
+    },
+    function(css, cb) {
+      appendFile(dist, css, cb);
+    }
+  ], cb);
+}
+
+/*
+ *
+ */
+function optimizeCSS(file, cb) {
+  var ccso = require('csso');
+
+  async.waterfall([
+    function(cb) {
+      readFile(file, cb);
+    },
+    function(cont, cb) {
+      writeFile(file, ccso.justDoIt(cont), cb);
+    }
+  ], cb);
+}
+
+/*
+ *
+ */
+function buildSprites(file, cb) {
+  var tailor = require('tailor');
+
+  tailor([file], {
+    rootDirPath: cfg.STATIC_ROOT
+  , outDirPath: path.dirname(file)
+  }, cb);
+}
+
+/*
+ *
+ */
+function embedBase64(file, cb) {
+  var enhance;
+  enhance = require('enhance-css');
+  enhance = new enhance({
+    assetHosts: cfg.ASSETS_HOSTS
+  , rootPath: cfg.STATIC_ROOT
+  });
+
+  async.waterfall([
+    function(cb) {
+      readFile(file, cb);
+    },
+    function(cont, cb) {
+      enhance.process(cont, cb)
+    },
+    function(cont, cb) {
+      writeFile(file, cont.embedded.plain, cb);
+    }
+  ], cb);
+}
+
+/*
+ *
+ */
+function gzip(from, to, cb) {
+  var zlib = require('zlib');
+
+  async.waterfall([
+    function(cb) {
+      readFile(from, cb);
+    },
+    function(cont, cb) {
+      zlib.gzip(cont, cb)
+    },
+    function(cont, cb) {
+      writeFile(to, cont, cb);
+    }
+  ], cb);
+}
+
+/*
+ *
+ */
+function readFile(file, cb) {
+  fs.readFile(file, 'utf8', cb);
+}
+
+/*
+ *
+ */
+function writeFile(file, cont, cb) {
+  async.waterfall([
+    function(cb) {
+      fs.writeFile(file, cont, cb);
+    },
+    function(cb) {
+      fs.stat(file, cb);
+    }
+  ], cb);
+}
+
+/*
+ *
+ */
+function appendFile(file, cont, cb) {
+  async.waterfall([
+    function(cb) {
+      fs.appendFile(file, cont, cb);
+    },
+    function(cb) {
+      fs.stat(file, cb);
+    }
+  ], cb);
+}
+
+/*
+ *
+ */
+function concatFiles(files, each, cb) {
+  if (!cb) {
+    cb = each;
+    each = null;
+  }
+
+  async.concatSeries(files, readFile, function(err, res) {
+    if (err) return cb(err);
+    cb(null, res.join(''));
+  });
+}
+
+/*
+ *
+ */
+function createDir(path, cb) {
+  fs.mkdir(path, cb);
+}
+
+/*
+ *
+ */
+function removeDir(path, cb) {
+  rimraf(path, cb);
+}
+
+/*
+ *
+ */
+function createDirs(dirs, cb) {
+  async.forEachSeries(dirs, function(dir, cb) {
+    fs.mkdir(dir, cb);
+  }, cb);
+}
+
+/*
+ *
+ */
+function createFiles(files, cb) {
+  async.forEachSeries(files, function(file, cb) {
+    fs.writeFile(file, '', cb);
+  }, cb);
+}
+
+/*
+ *
+ */
+function getSources(name) {
+  if (name == 'cmn') {
+    return require(getCmnSrcsPath()); 
+  } else {
+    return _.extend({}, require(getPageSrcsPath(name)),
+      _.pick(require(getCmnSrcsPath()), 'includes'));
+  }
+}
+
+/*
+ *
+ */
+function getPageDirPath(name) {
+  return sprintf('%s/%s', cfg.PAGES_ROOT, name);
+}
+
+/*
+ *
+ */
+function getPageTmplPath(name) {
+  return sprintf('%s/%2$s/%2$s.html', cfg.PAGES_ROOT, name);
+}
+
+/*
+ *
+ */
+function getPageSrcsPath(name) {
+  return sprintf('%s/%2$s/%2$s.json', cfg.PAGES_ROOT, name);
+}
+
+/*
+ *
+ */
+function getCmnSrcsPath() {
+  return sprintf('%s/cmn.json', cfg.PAGES_ROOT);
+}
+
+/*
+ *
+ */
+function getCSSDistName(page, group) {
+  return sprintf('%s.%s.css', page, group);
+}
+
+/*
+ *
+ */
+function getJSDistName(page, group) {
+  return sprintf('%s.%s.js', page, group);
+}
+
+/*
+ *
+ */
+function getCSSDistGzName(page, group) {
+  return sprintf('%s.%s.css.gz', page, group);
+}
+
+/*
+ *
+ */
+function getJSDistGzName(page, group) {
+  return sprintf('%s.%s.js.gz', page, group);
+}
+
+/*
+ *
+ */
+function updateDistVersion(hash, cb) {
+  fs.writeFile(cfg.VERSION_FILE, JSON.stringify(hash), cb);
+}
+
+/*
+ *
+ */
+function createDistDir(version) {
+  var dist = path.join(cfg.DISTS_ROOT, version);
+  fs.mkdirSync(dist);
+  return dist;
+}
+
+/*
+ *
+ */
+function moveFilesToDist(tempDir, distDir, cb) {
+  async.waterfall([
+    function(cb) {
+      fs.readdir(tempDir, cb);
+    },
+    function(files, cb) {
+      async.forEach(files, function(file, cb) {
+        fs.rename(
+          path.join(tempDir, file)
+        , path.join(distDir, file)
+        , cb);
+      }, cb);
+    }
+  ], cb)
+}
+
+/*
+ *
+ */
+function getExistingPages(cb) {
+  async.waterfall([
+    function(cb) {
+      fs.readdir(cfg.PAGES_ROOT, cb);
+    },
+    function(files, cb) {
+      var pages = [];
+
+      async.forEach(files, function(file, cb) {
+        fs.stat(path.join(cfg.PAGES_ROOT, file), function(err, stat) {
+          if (err) return cb(err);
+          if (stat.isDirectory()) {
+            pages.push(file);
+          }
+          cb();
+        });
+      }, function(err) {
+        if (err) return cb(err);
+        cb(null, pages);
+      });
+    }
+  ], cb);
+}
+
+/*
+ * Simple log
+ */
+function log() {
+  if (program.verbose) {
+    console.log.apply(console, arguments);
+  }
+}
+
+/*
+ * File action log
+ */
+function falog(msg, stat) {
+  if (program.verbose) {
+    console.log('   %s %s \033[90m(%s kb)\033[39m',
+      tick, msg, ~~(stat.size / 1024 * 100) / 100);
+  }
+}
