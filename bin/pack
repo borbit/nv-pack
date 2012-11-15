@@ -177,7 +177,7 @@ function buildCssDist(page, group, dir, cb) {
       buildSprites(dist, cb);
     },
     function(stat, cb) {
-      stat&& falog('built sprites with Tailor\t', stat);
+      stat && falog('built sprites with Tailor\t', stat);
       optimizeCSS(dist, cb);
     },
     function(stat, cb) {
@@ -379,10 +379,13 @@ function buildSprites(file, cb) {
   var tailor = require('tailor');
 
   tailor([file], {
-    rootDirPath: cfg.STATIC_ROOT
-  , outDirPath: path.dirname(file)
-  }, function(err) {
+    outDirPath: path.dirname(file)
+  , rootDirPath: cfg.STATIC_ROOT
+  }, function(err, files) {
     if (err) return cb(err);
+    if (files[0].length == 1) {
+      return cb(null, null);
+    }
     fs.stat(file, cb);
   });
 }
@@ -615,7 +618,7 @@ function moveFilesToDist(tempDir, distDir, cb) {
   ], cb)
 }
 
-/*
+/**
  * Looks through the pages directory and
  * returns names list of existing pages
  * 
@@ -645,7 +648,7 @@ function getExistingPages(cb) {
   ], cb);
 }
 
-/*
+/**
  * Returns names list of pages to pack basing on the existing
  * pages and pages names passed through the first argument, returns
  * error of at least one of passed pages is not exist. Addes "cmn"
@@ -684,7 +687,16 @@ function log() {
  */
 function falog(msg, stat) {
   if (program.verbose) {
-    console.log('   %s %s \033[90m(%s kb)\033[39m',
-      tick, msg, ~~(stat.size / 1024 * 100) / 100);
+    console.log('   %s %s \033[90m(%s kb)\033[39m', tick, msg, kb(stat.size));
   }
+}
+
+/**
+ * Returns size value in kilobites
+ *
+ * @param size integer
+ * @return float
+ */
+function kb(size) {
+  return ~~(size / 1024 * 100) / 100;
 }
