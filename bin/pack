@@ -27,7 +27,7 @@ var cwd = process.cwd();
  * Config
  */
 try {
-  var cfg = require(path.join(cwd + '/config'));
+  var cfg = require(path.join(cwd, '/config'));
 } catch (err) {
   console.error(" error: cannot find config file");
   process.exit(1);
@@ -39,45 +39,48 @@ var tick = '\033[32m✓\033[39m';
  * Pack
  */
 (function() {
-  // generating the temp and dist directory 
-  // pathes based on current timestamp
-  var now = Date.now().toString();
-  var tempDir = path.join(cfg.TEMPS_ROOT, now);
-  var distDir = path.join(cfg.DISTS_ROOT, now);
+  var ver = Date.now().toString();
+  var tmpDir = path.join(cfg.TEMPS_ROOT, ver);
+  var outDir = path.join(cfg.DISTS_ROOT, ver);
   
   async.waterfall([
     function(cb) {
       log(' preparing:');
 
-      createDir(tempDir, cb);
+      createDir(tmpDir, cb);
     },
     function(cb) {
-      log('  %s created temp directory \t \033[90m%s\033[39m', tick, tempDir);
+      log('  %s created temp directory \t\t \033[90m%s\033[39m', tick, tmpDir);
 
-      createDir(distDir, cb);
+      createDir(outDir, cb);
     },
     function(cb) {
-      log('  %s created dist directory \t \033[90m%s\033[39m', tick, distDir);
+      log('  %s created dist directory \t\t \033[90m%s\033[39m', tick, outDir);
 
       getPagesToPack(program.args, cb);
     },
     function(pages, cb) {
-      buildPagesDist(pages, tempDir, cb);
+      buildPagesDist(pages, tmpDir, cb);
     },
     function(map, cb) {
       log(' finalizing:');
 
-      createAssetsMapFile(map, distDir, cb);
+      createAssetsMapFile(map, outDir, cb);
     },
     function(cb) {
-      log('  %s created assets map file \033[90m%s\033[39m', tick, cfg.MAP_FILE);
+      log('  %s created "latest assets map" file \t \033[90m%s\033[39m', tick, cfg.MAP_FILE);
 
-      moveFilesToDist(tempDir, distDir, cb);
+      updateDistVersion(ver, cb);
     },
     function(cb) {
-      log('  %s moved files to the dist directory \033[90m%s\033[39m', tick, distDir);
+      log('  %s created "latest version" file \t \033[90m%s\033[39m', tick, cfg.VERSION_FILE);
 
-      removeDir(tempDir, cb);
+      moveFilesToDist(tmpDir, outDir, cb);
+    },
+    function(cb) {
+      log('  %s moved files to the dist directory \t \033[90m%s\033[39m', tick, outDir);
+
+      removeDir(tmpDir, cb);
     }
   ], function(err) {
     if (err) {
@@ -85,7 +88,7 @@ var tick = '\033[32m✓\033[39m';
       process.exit(1);
     }
 
-    log('  %s removed tmp directory  \033[90m%s\033[39m', tick, tempDir);
+    log('  %s removed tmp directory  \t\t \033[90m%s\033[39m', tick, tmpDir);
     log(' done!');
   });
 
@@ -169,27 +172,27 @@ function buildCssDist(page, group, dir, cb) {
       collectCss(csses, dist, cb);
     },
     function(stat, cb) {
-      stat && falog('concatted *.css files\t', stat);
+      stat && falog('concatted *.css files\t\t', stat);
       compileLess(lesses, srcs.includes, dist, cb);
     },
     function(stat, cb) {
-      stat && falog('compiled *.less files\t', stat);
+      stat && falog('compiled *.less files\t\t', stat);
       buildSprites(dist, cb);
     },
     function(stat, cb) {
-      stat && falog('built sprites with Tailor\t', stat);
+      stat && falog('built sprites with Tailor\t\t', stat);
       optimizeCSS(dist, cb);
     },
     function(stat, cb) {
-      stat && falog('optimized with CSSO\t', stat);
+      stat && falog('optimized with CSSO\t\t', stat);
       embedBase64(dist, cb);
     },
     function(stat, cb) {
-      stat && falog('embedded images\t\t', stat);
+      stat && falog('embedded images\t\t\t', stat);
       gzip(dist, gz, cb);
     },
     function(stat, cb) {
-      stat && falog('gzipped\t\t\t', stat);
+      stat && falog('gzipped\t\t\t\t', stat);
       cb(null, [dist, gz]);
     }
   ], cb);
@@ -215,15 +218,15 @@ function buildJSDist(page, group, dir, cb) {
       collectJS(jses, dist, cb);
     },
     function(stat, cb) {
-      falog('concatted *.js files\t', stat);
+      falog('concatted *.js files\t\t', stat);
       compressJS(dist, cb);
     },
     function(stat, cb) {
-      falog('compressed with UglifyJS\t', stat);
+      falog('compressed with UglifyJS\t\t', stat);
       gzip(dist, gz, cb);
     },
     function(stat, cb) {
-      falog('gzipped\t\t\t', stat);
+      falog('gzipped\t\t\t\t', stat);
       cb(null, [dist, gz]);
     }
   ], cb);
@@ -586,8 +589,8 @@ function getJSDistGzName(page, group) {
 /*
  *
  */
-function updateDistVersion(hash, cb) {
-  fs.writeFile(cfg.VERSION_FILE, JSON.stringify(hash), cb);
+function updateDistVersion(version, cb) {
+  fs.writeFile(cfg.VERSION_FILE, JSON.stringify(version), cb);
 }
 
 /*
