@@ -7,6 +7,7 @@ var package = require('../package.json')
   , sprintf = require('sprintf').sprintf
   , program = require('commander')
   , rimraf = require('rimraf')
+  , crypto = require('crypto')
   , async = require('async')
   , path = require('path')
   , _ = require('lodash')
@@ -19,6 +20,8 @@ program
   .version(package.version)
   .usage('[options] [pages]')
   .option('-v, --verbose', 'verbose output')
+  .option('-c, --chksum', 'experimental: add checksum to process files name')
+  .option('-i, --images', 'experimental: include images to package')
   .parse(process.argv);
 
 var cwd = process.cwd();
@@ -42,21 +45,21 @@ var tick = '\033[32m✓\033[39m';
   var ver = Date.now().toString();
   var tmpDir = path.join(cfg.TEMPS_ROOT, ver);
   var outDir = path.join(cfg.DISTS_ROOT, ver);
+
+  var assetsMap;
+  var imagesMap;
   
   async.waterfall([
     function(cb) {
       log(' preparing:');
-
       createDir(tmpDir, cb);
     },
     function(cb) {
       log('  %s created temp directory \t\t \033[90m%s\033[39m', tick, tmpDir);
-
       createDir(outDir, cb);
     },
     function(cb) {
       log('  %s created dist directory \t\t \033[90m%s\033[39m', tick, outDir);
-
       getPagesToPack(program.args, cb);
     },
     function(pages, cb) {
@@ -64,22 +67,18 @@ var tick = '\033[32m✓\033[39m';
     },
     function(map, cb) {
       log(' finalizing:');
-
       createAssetsMapFile(map, outDir, cb);
     },
     function(cb) {
       log('  %s created "latest assets map" file \t \033[90m%s\033[39m', tick, cfg.MAP_FILE);
-
       updateDistVersion(ver, cb);
     },
     function(cb) {
       log('  %s created "latest version" file \t \033[90m%s\033[39m', tick, cfg.VERSION_FILE);
-
       moveFilesToDist(tmpDir, outDir, cb);
     },
     function(cb) {
       log('  %s moved files to the dist directory \t \033[90m%s\033[39m', tick, outDir);
-
       removeDir(tmpDir, cb);
     }
   ], function(err) {
@@ -155,8 +154,6 @@ function buildPagesDist(pages, dir, cb) {
  */
 function buildCssDist(page, group, dir, cb) {
   var dist = path.join(dir, getCSSDistName(page, group));
-  var gz = path.join(dir, getCSSDistGzName(page, group));
-
   var srcs = getSources(page)
     , csses = srcs['css_' + group]
     , lesses = srcs['less_' + group];
@@ -189,11 +186,14 @@ function buildCssDist(page, group, dir, cb) {
     },
     function(stat, cb) {
       stat && falog('embedded images\t\t\t', stat);
-      gzip(dist, gz, cb);
+      markFile(dist, cb);
+    },
+    function(marked, cb) {
+      gzip(marked, marked + '.gz', cb);
     },
     function(stat, cb) {
       stat && falog('gzipped\t\t\t\t', stat);
-      cb(null, [dist, gz]);
+      cb(null, true);
     }
   ], cb);
 }
@@ -203,8 +203,6 @@ function buildCssDist(page, group, dir, cb) {
  */
 function buildJSDist(page, group, dir, cb) {
   var dist = path.join(dir, getJSDistName(page, group));
-  var gz = path.join(dir, getJSDistGzName(page, group));
-
   var srcs = getSources(page);
   var jses = srcs['js_' + group];
 
@@ -223,11 +221,14 @@ function buildJSDist(page, group, dir, cb) {
     },
     function(stat, cb) {
       falog('compressed with UglifyJS\t\t', stat);
-      gzip(dist, gz, cb);
+      markFile(dist, cb);
+    },
+    function(marked, cb) {
+      gzip(marked, marked + '.gz', cb);
     },
     function(stat, cb) {
       falog('gzipped\t\t\t\t', stat);
-      cb(null, [dist, gz]);
+      cb(null, true);
     }
   ], cb);
 }
@@ -437,10 +438,49 @@ function gzip(from, to, cb) {
 }
 
 /*
+ * Renames file adding md5 checksum of its content.
+ * Passes new name to the callback function.
+ * 
+ * @param filePath string
+ * @param cb fucntion
+ */
+function markFile(filePath, cb) {
+  // Don't do anything if feature is not turned on.
+  // Temporrary solution, to experiment with it first.
+  if (!program.chksum) {
+    return cb(null, null);
+  }
+
+  readFile(filePath, function(err, cont) {
+    if (err) return cb(err);
+
+    var fileName = path.basename(filePath);
+    var dirPath = path.dirname(filePath);
+
+    var md5 = crypto.createHash('md5');
+    md5 = md5.update(cont);
+    md5 = md5.digest('hex');
+
+    var chunks = fileName.split('.');
+    var mark = md5.substr(0, 15);
+    
+    chunks.splice(chunks.length-1, 0, mark);
+
+    var newName = chunks.join('.');
+    var newPath = path.join(dirPath, newName);
+
+    fs.rename(filePath, newPath, function(err) {
+      if (err) return cb(err);
+      cb(null, newPath);
+    });
+  });
+}
+
+/*
  *
  */
-function readFile(file, cb) {
-  fs.readFile(file, 'utf8', cb);
+function readFile(filePath, cb) {
+  fs.readFile(filePath, 'utf8', cb);
 }
 
 /*
@@ -689,9 +729,7 @@ function log() {
  * File action log
  */
 function falog(msg, stat) {
-  if (program.verbose) {
-    console.log('   %s %s \033[90m(%s kb)\033[39m', tick, msg, kb(stat.size));
-  }
+  log('   %s %s \033[90m(%s kb)\033[39m', tick, msg, kb(stat.size));
 }
 
 /**
