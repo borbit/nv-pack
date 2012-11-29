@@ -20,8 +20,8 @@ program
   .version(package.version)
   .usage('[options] [pages]')
   .option('-v, --verbose', 'verbose output')
-  .option('-c, --chksum', 'experimental: add checksum to process files name')
-  .option('-i, --images', 'experimental: include images to package')
+  .option('-m, --mark', 'experimental: add checksum to process files names')
+  .option('-i, --images', 'experimental: include images into the package')
   .parse(process.argv);
 
 var cwd = process.cwd();
@@ -51,34 +51,82 @@ var tick = '\033[32m✓\033[39m';
   
   async.waterfall([
     function(cb) {
-      log(' preparing:');
       createDir(tmpDir, cb);
     },
     function(cb) {
-      log('  %s created temp directory \t\t \033[90m%s\033[39m', tick, tmpDir);
+      log(' %s created temp directory \t\t \033[90m%s\033[39m', tick, tmpDir);
       createDir(outDir, cb);
     },
     function(cb) {
-      log('  %s created dist directory \t\t \033[90m%s\033[39m', tick, outDir);
+      log(' %s created dist directory \t\t \033[90m%s\033[39m', tick, outDir);
       getPagesToPack(program.args, cb);
     },
     function(pages, cb) {
       buildPagesDist(pages, tmpDir, cb);
     },
     function(map, cb) {
-      log(' finalizing:');
-      createAssetsMapFile(map, outDir, cb);
+      assetsMap = map;
+
+      // Don't do anything if "mark" feature is not turned on.
+      // Temporrary solution, to experiment with it first.
+      if (!program.mark) {
+        return cb(null, null);
+      }
+
+      markAssets(assetsMap, cb);
+    },
+    function(map, cb) {
+      // Do it only if the "mark" feature is turned on.
+      // Temporrary solution, to experiment with it first.
+      if (program.mark) {
+        log(' %s marked assets with md5 checksum', tick);
+        assetsMap = map;
+      }
+
+      // Don't do anything if "images" feature is not turned on.
+      // Temporrary solution, to experiment with it first.
+      if (!program.images) {
+        return cb(null, null);
+      }
+      
+      gatherImages(cfg.STATIC_ROOT, tmpDir, cb);
+    },
+    function(map, cb) {
+      // Don't do anything if "images" feature is not turned on.
+      // Temporrary solution, to experiment with it first.
+      if (!program.images) {
+        return cb();
+      }
+
+      log(' %s gathered all existing images', tick);
+
+      imagesMap = map;
+      applyImagesMap(assetsMap, imagesMap, cb);
     },
     function(cb) {
-      log('  %s created "latest assets map" file \t \033[90m%s\033[39m', tick, cfg.MAP_FILE);
+      // Do it only if the "images" feature is turned on.
+      // Temporrary solution, to experiment with it first.
+      if (program.images) {
+        log(' %s applyed gathered images to assets', tick);
+      }
+      
+      gzipAssets(assetsMap, cb);
+    },
+    function(oldSize, newSize, cb) {
+      var rate = 100 - ~~(newSize / (oldSize / 100));
+      log(' %s gzipped all gzippable \t\t \033[90m%s%\033[39m', tick, rate);
+      createAssetsMapFile(assetsMap, outDir, cb);
+    },
+    function(cb) {
+      log(' %s created assets map file \t\t \033[90m%s\033[39m', tick, cfg.MAP_FILE);
       updateDistVersion(ver, cb);
     },
     function(cb) {
-      log('  %s created "latest version" file \t \033[90m%s\033[39m', tick, cfg.VERSION_FILE);
+      log(' %s created "latest version" file \t \033[90m%s\033[39m', tick, cfg.VERSION_FILE);
       moveFilesToDist(tmpDir, outDir, cb);
     },
     function(cb) {
-      log('  %s moved files to the dist directory \t \033[90m%s\033[39m', tick, outDir);
+      log(' %s moved files to the dist directory \t \033[90m%s\033[39m', tick, outDir);
       removeDir(tmpDir, cb);
     }
   ], function(err) {
@@ -87,7 +135,7 @@ var tick = '\033[32m✓\033[39m';
       process.exit(1);
     }
 
-    log('  %s removed tmp directory  \t\t \033[90m%s\033[39m', tick, tmpDir);
+    log(' %s removed tmp directory  \t\t \033[90m%s\033[39m', tick, tmpDir);
     log(' done!');
   });
 
@@ -153,7 +201,6 @@ function buildPagesDist(pages, dir, cb) {
  *
  */
 function buildCssDist(page, group, dir, cb) {
-  var dist = path.join(dir, getCSSDistName(page, group));
   var srcs = getSources(page)
     , csses = srcs['css_' + group]
     , lesses = srcs['less_' + group];
@@ -163,6 +210,8 @@ function buildCssDist(page, group, dir, cb) {
     log('   \033[90m✘ nothing to build here\033[39m');
     return cb(null, []);
   }
+
+  var dist = path.join(dir, sprintf('%s.%s.css', page, group));
 
   async.waterfall([
     function(cb) {
@@ -186,14 +235,7 @@ function buildCssDist(page, group, dir, cb) {
     },
     function(stat, cb) {
       stat && falog('embedded images\t\t\t', stat);
-      markFile(dist, cb);
-    },
-    function(marked, cb) {
-      gzip(marked, marked + '.gz', cb);
-    },
-    function(stat, cb) {
-      stat && falog('gzipped\t\t\t\t', stat);
-      cb(null, true);
+      cb(null, dist);
     }
   ], cb);
 }
@@ -202,7 +244,6 @@ function buildCssDist(page, group, dir, cb) {
  *
  */
 function buildJSDist(page, group, dir, cb) {
-  var dist = path.join(dir, getJSDistName(page, group));
   var srcs = getSources(page);
   var jses = srcs['js_' + group];
 
@@ -210,6 +251,8 @@ function buildJSDist(page, group, dir, cb) {
     log('   \033[90m✘ nothing to build here\033[39m');
     return cb(null, []);
   }
+
+  var dist = path.join(dir, sprintf('%s.%s.js', page, group));
 
   async.waterfall([
     function(cb) {
@@ -221,14 +264,7 @@ function buildJSDist(page, group, dir, cb) {
     },
     function(stat, cb) {
       falog('compressed with UglifyJS\t\t', stat);
-      markFile(dist, cb);
-    },
-    function(marked, cb) {
-      gzip(marked, marked + '.gz', cb);
-    },
-    function(stat, cb) {
-      falog('gzipped\t\t\t\t', stat);
-      cb(null, true);
+      cb(null, dist);
     }
   ], cb);
 }
@@ -236,29 +272,29 @@ function buildJSDist(page, group, dir, cb) {
 /*
  *
  */
-function createAssetsMapFile(distMap, distDir, cb) {
-  var result = {};
+function createAssetsMapFile(assetsMap, distDir, cb) {
+  var map = {};
 
-  _.each(distMap, function(assets, page) {
+  _.each(assetsMap, function(assets, page) {
     var css = {}, js = {};
 
-    _.each(_.keys(assets.css), function(group) {
-      css[group] = getCSSDistName(page, group);
+    _.each(assets.css, function(asset, group) {
+      css[group] = path.basename(asset);
     });
-    _.each(_.keys(assets.js), function(group) {
-      js[group] = getJSDistName(page, group);
+    _.each(assets.js, function(asset, group) {
+      js[group] = path.basename(asset);
     });
 
-    result[page] = {};
+    map[page] = {};
 
     if (_.size(css))
-      result[page].css = css;
+      map[page].css = css;
     if (_.size(js))
-      result[page].js = js;
+      map[page].js = js;
   });
 
   // TODO: Tmp solution for moving asset config out of site_media dir
-  fs.writeFile(cfg.MAP_FILE, JSON.stringify(result), cb);
+  fs.writeFile(cfg.MAP_FILE, JSON.stringify(map), cb);
 }
 
 /*
@@ -442,21 +478,20 @@ function gzip(from, to, cb) {
  * Passes new name to the callback function.
  * 
  * @param filePath string
+ * @param outDirPath string (optional)
  * @param cb fucntion
  */
-function markFile(filePath, cb) {
-  // Don't do anything if feature is not turned on.
-  // Temporrary solution, to experiment with it first.
-  if (!program.chksum) {
-    return cb(null, null);
+function markFile(filePath, outDirPath, cb) {
+  // if outDirPath is not provided
+  if (!cb) {
+    cb = outDirPath;
+    outDirPath = null;
   }
 
   readFile(filePath, function(err, cont) {
     if (err) return cb(err);
 
     var fileName = path.basename(filePath);
-    var dirPath = path.dirname(filePath);
-
     var md5 = crypto.createHash('md5');
     md5 = md5.update(cont);
     md5 = md5.digest('hex');
@@ -467,12 +502,25 @@ function markFile(filePath, cb) {
     chunks.splice(chunks.length-1, 0, mark);
 
     var newName = chunks.join('.');
-    var newPath = path.join(dirPath, newName);
 
-    fs.rename(filePath, newPath, function(err) {
-      if (err) return cb(err);
-      cb(null, newPath);
-    });
+    if (outDirPath) {
+      var newPath = path.join(outDirPath, newName);
+      var rStream = fs.createReadStream(filePath);
+      var wStream = fs.createWriteStream(newPath);
+      rStream.pipe(wStream);
+      rStream.on('end', function(err) {
+        if (err) return cb(err);
+        cb(null, newPath);
+      });
+    } else {
+      var dirPath = path.dirname(filePath);
+      var newPath = path.join(dirPath, newName);
+
+      fs.rename(filePath, newPath, function(err) {
+        if (err) return cb(err);
+        cb(null, newPath);
+      });
+    }
   });
 }
 
@@ -601,34 +649,6 @@ function getCmnSrcsPath() {
 /*
  *
  */
-function getCSSDistName(page, group) {
-  return sprintf('%s.%s.css', page, group);
-}
-
-/*
- *
- */
-function getJSDistName(page, group) {
-  return sprintf('%s.%s.js', page, group);
-}
-
-/*
- *
- */
-function getCSSDistGzName(page, group) {
-  return sprintf('%s.%s.css.gz', page, group);
-}
-
-/*
- *
- */
-function getJSDistGzName(page, group) {
-  return sprintf('%s.%s.js.gz', page, group);
-}
-
-/*
- *
- */
 function updateDistVersion(version, cb) {
   fs.writeFile(cfg.VERSION_FILE, JSON.stringify(version), cb);
 }
@@ -717,6 +737,154 @@ function getPagesToPack(pages, cb) {
 }
 
 /*
+ *
+ */
+function gatherImages(dirPath, outDirPath, cb) {
+  findImages(dirPath, function(err, list) {
+    if (err) return cb(err);
+
+    var map = {};
+
+    async.forEach(list, function(imgPath, cb) {
+      markFile(imgPath, outDirPath, function(err, newPath) {
+        if (err) return cb(err);
+
+        var orgImgPath = imgPath.replace(dirPath + '/', '');
+        var newImgPath = newPath.replace(outDirPath + '/', '');
+        map[orgImgPath] = newImgPath;
+        cb();
+      });
+    }, function(err) {
+      if (err) return cb(err);
+      cb(err, map);
+    });
+  });
+}
+
+/*
+ *
+ */
+function findImages(dirPath, cb) {
+  fs.readdir(dirPath, function(err, list) {
+    if (err) return cb(err);
+
+    var images = _.filter(list, function(fileName) {
+      return ~fileName.indexOf('.jpg')
+          || ~fileName.indexOf('.jpeg')
+          || ~fileName.indexOf('.webp') //soon
+          || ~fileName.indexOf('.png')
+          || ~fileName.indexOf('.gif');
+    });
+
+    images = _.map(images, function(fileName) {
+      return path.join(dirPath, fileName);
+    });
+
+    filterDirs(list, dirPath, function(dirs) {
+      dirs = _.map(dirs, function(dirName) {
+        return path.join(dirPath, dirName);
+      });
+
+      async.concat(dirs, findImages, function(err, other) {
+        if (err) return cb(err);
+        cb(null, images.concat(other));
+      });
+    });
+  });
+}
+
+/**
+ *
+ */
+function markAssets(map, cb) {
+  var marked = {};
+
+  eachAsset(map, function(filePath, p, cb) {
+    markFile(filePath, function(err, newPath) {
+      if (err) return cb(err);
+
+      var inpage = marked[p.page] || (marked[p.page] = {});
+      var ingroup = inpage[p.group] || (inpage[p.group] = {});
+      ingroup[p.asset] = newPath;
+
+      cb();
+    });
+  }, function(err) {
+    if (err) return cb(err);
+    cb(null, marked);
+  });
+}
+
+/**
+ *
+ */
+function gzipAssets(map, cb) {
+  var oldTotalSize = 0;
+  var newTotalSize = 0;
+  
+  eachAsset(map, function(filePath, p, cb) {
+    var gzPath = filePath + '.gz';
+
+    fs.stat(filePath, function(err, oldStat) {
+      if (err) return cb(err);
+      
+      gzip(filePath, gzPath, function(err, newStat) {
+        if (err) return cb(err);
+
+        oldTotalSize += oldStat.size;
+        newTotalSize += newStat.size;
+        cb();
+      });
+    });
+  }, function(err) {
+    if (err) return cb(err);
+    cb(null
+    , oldTotalSize
+    , newTotalSize);
+  });
+}
+
+/**
+ *
+ */
+function filterDirs(list, rootPath, cb) {
+  async.filter(list, function(fileName, cb) {
+    var filePath = path.join(rootPath, fileName);
+
+    fs.stat(filePath, function(err, stat) {
+      if (err) return cb(err);
+      cb(stat.isDirectory());
+    });
+  }, cb);
+}
+
+/**
+ *
+ */
+function eachAsset(map, iter, cb) {
+  var pages = _.keys(map);
+
+  async.forEach(pages, function(page, cb) {
+    var groups = _.keys(map[page]);
+    var inpage = map[page];
+
+    async.forEach(groups, function(group, cb) {
+      var assets = _.keys(inpage[group]);
+      var ingroup = inpage[group];
+
+      async.forEach(assets, function(asset, cb) {
+        iter(ingroup[asset], {
+          page  : page
+        , group : group
+        , asset : asset
+        }, cb);
+      }, cb);
+
+    }, cb);
+  }, cb);
+}
+
+/*
  * Simple log
  */
 function log() {
@@ -729,7 +897,7 @@ function log() {
  * File action log
  */
 function falog(msg, stat) {
-  log('   %s %s \033[90m(%s kb)\033[39m', tick, msg, kb(stat.size));
+  log('   %s %s \033[90m%s kb\033[39m', tick, msg, kb(stat.size));
 }
 
 /**
