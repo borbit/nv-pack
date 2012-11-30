@@ -55,10 +55,6 @@ var tick = '\033[32m✓\033[39m';
     },
     function(cb) {
       log(' %s created temp directory \t\t \033[90m%s\033[39m', tick, tmpDir);
-      createDir(outDir, cb);
-    },
-    function(cb) {
-      log(' %s created dist directory \t\t \033[90m%s\033[39m', tick, outDir);
       getPagesToPack(program.args, cb);
     },
     function(pages, cb) {
@@ -109,20 +105,40 @@ var tick = '\033[32m✓\033[39m';
       if (program.images) {
         log(' %s applyed gathered images to assets', tick);
       }
-      
+
       gzipAssets(assetsMap, cb);
     },
     function(oldSize, newSize, cb) {
       var rate = 100 - ~~(newSize / (oldSize / 100));
       log(' %s gzipped all gzippable \t\t \033[90m%s%\033[39m', tick, rate);
+
+      // Don't do anything if "images" feature is not turned on.
+      // Temporrary solution, to experiment with it first.
+      if (!program.images) {
+        return cb();
+      }
+
+      createImagesMapFile(imagesMap, outDir, cb);
+    },
+    function(cb) {
+      // Do it only if the "images" feature is turned on.
+      // Temporrary solution, to experiment with it first.
+      if (program.images) {
+        log(' %s created images map file \t\t \033[90m%s\033[39m', tick, cfg.IMAGES_MAP_FILE);
+      }
+
       createAssetsMapFile(assetsMap, outDir, cb);
     },
     function(cb) {
-      log(' %s created assets map file \t\t \033[90m%s\033[39m', tick, cfg.MAP_FILE);
+      log(' %s created assets map file \t\t \033[90m%s\033[39m', tick, cfg.ASSETS_MAP_FILE);
       updateDistVersion(ver, cb);
     },
     function(cb) {
       log(' %s created "latest version" file \t \033[90m%s\033[39m', tick, cfg.VERSION_FILE);
+      createDir(outDir, cb);
+    },
+    function(cb) {
+      log(' %s created dist directory \t\t \033[90m%s\033[39m', tick, outDir);
       moveFilesToDist(tmpDir, outDir, cb);
     },
     function(cb) {
@@ -234,7 +250,7 @@ function buildCssDist(page, group, dir, cb) {
       embedBase64(dist, cb);
     },
     function(stat, cb) {
-      stat && falog('embedded images\t\t\t', stat);
+      stat && falog('embedded images and asset hosts\t', stat);
       cb(null, dist);
     }
   ], cb);
@@ -293,8 +309,16 @@ function createAssetsMapFile(assetsMap, distDir, cb) {
       map[page].js = js;
   });
 
-  // TODO: Tmp solution for moving asset config out of site_media dir
-  fs.writeFile(cfg.MAP_FILE, JSON.stringify(map), cb);
+  // TODO: Tmp solution for moving assets map file out of site_media dir
+  fs.writeFile(cfg.ASSETS_MAP_FILE, JSON.stringify(map), cb);
+}
+
+/*
+ *
+ */
+function createImagesMapFile(assetsMap, distDir, cb) {
+  // TODO: Tmp solution for moving images map file out of site_media dir
+  fs.writeFile(cfg.IMAGES_MAP_FILE, JSON.stringify(assetsMap), cb);
 }
 
 /*
@@ -439,6 +463,7 @@ function embedBase64(file, cb) {
   enhance = new enhance({
     assetHosts: cfg.ASSETS_HOSTS
   , rootPath: cfg.STATIC_ROOT
+  , stamp: false
   });
 
   async.waterfall([
@@ -749,16 +774,33 @@ function gatherImages(dirPath, outDirPath, cb) {
       markFile(imgPath, outDirPath, function(err, newPath) {
         if (err) return cb(err);
 
-        var orgImgPath = imgPath.replace(dirPath + '/', '');
-        var newImgPath = newPath.replace(outDirPath + '/', '');
-        map[orgImgPath] = newImgPath;
+        var orgImgUrl = imgPath.replace(dirPath + '/', '');
+        var newImgUrl = newPath.replace(outDirPath + '/', '');
+        map[orgImgUrl] = newImgUrl;
         cb();
       });
     }, function(err) {
       if (err) return cb(err);
-      cb(err, map);
+      cb(null, map);
     });
   });
+}
+
+/*
+ *
+ */
+function applyImagesMap(assetsMap, imagesMap, cb) {
+  eachAsset(assetsMap, function(filePath, p, cb) {
+    readFile(filePath, function(err, content) {
+      if (err) return cb(err);
+
+      _.each(imagesMap, function(newUrl, orgUrl) {
+        content = content.split(orgUrl).join(newUrl);
+      });
+      
+      writeFile(filePath, content, cb);
+    });
+  }, cb);
 }
 
 /*
@@ -818,11 +860,11 @@ function markAssets(map, cb) {
 /**
  *
  */
-function gzipAssets(map, cb) {
+function gzipAssets(assetsMap, cb) {
   var oldTotalSize = 0;
   var newTotalSize = 0;
   
-  eachAsset(map, function(filePath, p, cb) {
+  eachAsset(assetsMap, function(filePath, p, cb) {
     var gzPath = filePath + '.gz';
 
     fs.stat(filePath, function(err, oldStat) {
