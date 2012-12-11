@@ -50,7 +50,6 @@ var tick = '\033[32m✓\033[39m';
   // Explicitly set output dir
   if (program.output) {
   	outDir = program.output;
-		log("Output dir set: ", program.output);
   }
 
   var assetsMap;
@@ -610,11 +609,10 @@ function concatFiles(files, each, cb) {
  *
  */
 function createDir(path, cb) {
-	if (!fs.existsSync(path)) {
-	  fs.mkdir(path, cb);
-	} else {
-		cb.apply();
-	}
+  fs.exists(path, function(exists) {
+    if (exists) return cb();
+    fs.mkdir(path, cb);
+  });
 }
 
 /*
@@ -622,19 +620,6 @@ function createDir(path, cb) {
  */
 function removeDir(path, cb) {
   rimraf(path, cb);
-}
-
-/*
- *
- */
-function createDirs(dirs, cb) {
-  async.forEachSeries(dirs, function(dir, cb) {
-		if (!fs.existsSync(dir)) {
-	    fs.mkdir(dir, cb);
-		} else {
-			cb.apply();
-		}
-  }, cb);
 }
 
 /*
@@ -691,21 +676,6 @@ function getCmnSrcsPath() {
  */
 function updateDistVersion(version, cb) {
   fs.writeFile(cfg.VERSION_FILE, JSON.stringify(version), cb);
-}
-
-/*
- *
- */
-function createDistDir(version) {
-  // TODO: Make note of the "output" cli option.
-  var dist = path.join(cfg.DISTS_ROOT, version);
-  if (program.output) {
-  	dist = program.output;
-  }
-	if (!fs.existsSync(dist)) {
-	  fs.mkdirSync(dist);
-	}
-  return dist;
 }
 
 /*
