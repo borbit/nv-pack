@@ -22,7 +22,7 @@ program
   .option('-v, --verbose', 'verbose output')
   .option('-m, --mark', 'experimental: add checksum to process files names')
   .option('-i, --images', 'experimental: include images into the package')
-  .option('-o, --output', 'experimental: explicitly set output dir')
+  .option('-o, --output <path>', 'experimental: explicitly set output dir')
   .parse(process.argv);
 
 var cwd = process.cwd();
@@ -50,6 +50,7 @@ var tick = '\033[32m✓\033[39m';
   // Explicitly set output dir
   if (program.output) {
   	outDir = program.output;
+		log("Output dir set: ", program.output);
   }
 
   var assetsMap;
@@ -609,7 +610,11 @@ function concatFiles(files, each, cb) {
  *
  */
 function createDir(path, cb) {
-  fs.mkdir(path, cb);
+	if (!fs.existsSync(path)) {
+	  fs.mkdir(path, cb);
+	} else {
+		cb.apply();
+	}
 }
 
 /*
@@ -624,7 +629,11 @@ function removeDir(path, cb) {
  */
 function createDirs(dirs, cb) {
   async.forEachSeries(dirs, function(dir, cb) {
-    fs.mkdir(dir, cb);
+		if (!fs.existsSync(dir)) {
+	    fs.mkdir(dir, cb);
+		} else {
+			cb.apply();
+		}
   }, cb);
 }
 
@@ -690,7 +699,12 @@ function updateDistVersion(version, cb) {
 function createDistDir(version) {
   // TODO: Make note of the "output" cli option.
   var dist = path.join(cfg.DISTS_ROOT, version);
-  fs.mkdirSync(dist);
+  if (program.output) {
+  	dist = program.output;
+  }
+	if (!fs.existsSync(dist)) {
+	  fs.mkdirSync(dist);
+	}
   return dist;
 }
 
