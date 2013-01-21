@@ -71,8 +71,6 @@ var tick = '\033[32m✓\033[39m';
     function(map, cb) {
       assetsMap = map;
 
-      // Don't do anything if "mark" feature is not turned on.
-      // Temporrary solution, to experiment with it first.
       if (!program.mark) {
         return cb(null, null);
       }
@@ -80,15 +78,10 @@ var tick = '\033[32m✓\033[39m';
       markAssets(assetsMap, cb);
     },
     function(map, cb) {
-      // Do it only if the "mark" feature is turned on.
-      // Temporrary solution, to experiment with it first.
       if (program.mark) {
         log(' %s marked assets with md5 checksum', tick);
         assetsMap = map;
       }
-
-      // Don't do anything if "images" feature is not turned on.
-      // Temporrary solution, to experiment with it first.
       if (!program.images) {
         return cb(null, null);
       }
@@ -96,8 +89,6 @@ var tick = '\033[32m✓\033[39m';
       gatherImages(cfg.STATIC_ROOT, tmpDir, cb);
     },
     function(map, cb) {
-      // Don't do anything if "images" feature is not turned on.
-      // Temporrary solution, to experiment with it first.
       if (!program.images) {
         return cb(null, null);
       }
@@ -105,22 +96,33 @@ var tick = '\033[32m✓\033[39m';
       log(' %s gathered all existing images', tick);
 
       imagesMap = map;
+
+      if (!program.optimize) {
+        return cb(null, null);
+      }
+
       optimizeJPEG(tmpDir, imagesMap, cb);
     },
     function(rate, cb) {
-      // Don't do anything if "images" feature is not turned on.
-      // Temporrary solution, to experiment with it first.
-      if (!program.images) {
-        return cb();
+      if (!program.optimize) {
+        return cb(null, null);
       }
 
       log(' %s optimized JPEG images with jpegtran  \t\t \033[90m%s%\033[39m', tick, rate);
 
+      optimizePNG(tmpDir, imagesMap, cb);
+    },
+    function(rate, cb) {
+      if (program.optimize) {
+        log(' %s optimized PNG images with optipng  \t\t \033[90m%s%\033[39m', tick, rate);
+      }
+      if (!program.images) {
+        return cb();
+      }
+
       applyImagesMap(assetsMap, imagesMap, cb);
     },
     function(cb) {
-      // Do it only if the "images" feature is turned on.
-      // Temporrary solution, to experiment with it first.
       if (program.images) {
         log(' %s applyed gathered images to assets', tick);
       }
@@ -130,8 +132,6 @@ var tick = '\033[32m✓\033[39m';
     function(rate, cb) {
       log(' %s gzipped all gzippable \t\t \033[90m%s%\033[39m', tick, rate);
 
-      // Don't do anything if "images" feature is not turned on.
-      // Temporrary solution, to experiment with it first.
       if (!program.images) {
         return cb();
       }
@@ -139,12 +139,9 @@ var tick = '\033[32m✓\033[39m';
       createImagesMapFile(imagesMap, outDir, cb);
     },
     function(cb) {
-      // Do it only if the "images" feature is turned on.
-      // Temporrary solution, to experiment with it first.
       if (program.images) {
         log(' %s created images map file \t\t \033[90m%s\033[39m', tick, cfg.IMAGES_MAP_FILE);
       }
-
       createAssetsMapFile(assetsMap, outDir, cb);
     },
     function(cb) {
@@ -168,7 +165,6 @@ var tick = '\033[32m✓\033[39m';
       console.error(' error: %s', err.message);
       process.exit(1);
     }
-
     log(' %s removed tmp directory  \t\t \033[90m%s\033[39m', tick, tmpDir);
     log(' done!');
   });

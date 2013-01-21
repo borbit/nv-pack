@@ -10,7 +10,6 @@
     "sprintf": "0.x",
     "lodash": "0.x",
     "rimraf": "2.x",
-    "tailor": "*",
     "async": "0.x",
     "less": "1.x",
     "csso": "*"
