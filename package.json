@@ -1,16 +1,15 @@
 {
   "name": "front-pack",
-  "version": "0.0.2",
+  "version": "0.0.4",
   "description": "Build tool for packing static distribution packages. Part of the node-front project.",
   "author": "Serge Borbit <serge.borbit@gmail.com>",
   "dependencies": {
-    "enhance-css": "https://github.com/borbit/enhance-css/archive/master.tar.gz",
+    "enhance-css": "*",
     "commander": "*",
     "uglify-js": "1.x",
     "sprintf": "0.x",
     "lodash": "0.x",
     "rimraf": "2.x",
-    "tailor": "*",
     "async": "0.x",
     "less": "1.x",
     "csso": "*"

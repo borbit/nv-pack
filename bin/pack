@@ -19,9 +19,12 @@ var package = require('../package.json')
 program
   .version(package.version)
   .usage('[options] [pages]')
-  .option('-v, --verbose', 'verbose output')
-  .option('-m, --mark', 'experimental: add checksum to process files names')
-  .option('-i, --images', 'experimental: include images into the package')
+  .option('-v, --verbose'    , 'verbose output')
+  .option('-m, --mark'       , 'add checksum to processed file names')
+  .option('-i, --images'     , 'include all blocks\' images into the package')
+  .option('-s, --sprites'    , 'build sprites and include them into the package')
+  .option('-e, --optimize'   , 'optimize images included into the package')
+  .option('-o, --out <path>' , 'package output dir')
   .parse(process.argv);
 
 var cwd = process.cwd();
@@ -45,6 +48,11 @@ var tick = '\033[32m✓\033[39m';
   var ver = Date.now().toString();
   var tmpDir = path.join(cfg.TEMPS_ROOT, ver);
   var outDir = path.join(cfg.DISTS_ROOT, ver);
+  
+  // Explicitly set output dir
+  if (program.output) {
+    outDir = program.output;
+  }
 
   var assetsMap;
   var imagesMap;
@@ -63,8 +71,6 @@ var tick = '\033[32m✓\033[39m';
     function(map, cb) {
       assetsMap = map;
 
-      // Don't do anything if "mark" feature is not turned on.
-      // Temporrary solution, to experiment with it first.
       if (!program.mark) {
         return cb(null, null);
       }
@@ -72,15 +78,10 @@ var tick = '\033[32m✓\033[39m';
       markAssets(assetsMap, cb);
     },
     function(map, cb) {
-      // Do it only if the "mark" feature is turned on.
-      // Temporrary solution, to experiment with it first.
       if (program.mark) {
         log(' %s marked assets with md5 checksum', tick);
         assetsMap = map;
       }
-
-      // Don't do anything if "images" feature is not turned on.
-      // Temporrary solution, to experiment with it first.
       if (!program.images) {
         return cb(null, null);
       }
@@ -88,32 +89,49 @@ var tick = '\033[32m✓\033[39m';
       gatherImages(cfg.STATIC_ROOT, tmpDir, cb);
     },
     function(map, cb) {
-      // Don't do anything if "images" feature is not turned on.
-      // Temporrary solution, to experiment with it first.
       if (!program.images) {
-        return cb();
+        return cb(null, null);
       }
 
       log(' %s gathered all existing images', tick);
 
       imagesMap = map;
+
+      if (!program.optimize) {
+        return cb(null, null);
+      }
+
+      optimizeJPEG(tmpDir, imagesMap, cb);
+    },
+    function(rate, cb) {
+      if (!program.optimize) {
+        return cb(null, null);
+      }
+
+      log(' %s optimized JPEG images with jpegtran  \t\t \033[90m%s%\033[39m', tick, rate);
+
+      optimizePNG(tmpDir, imagesMap, cb);
+    },
+    function(rate, cb) {
+      if (program.optimize) {
+        log(' %s optimized PNG images with optipng  \t\t \033[90m%s%\033[39m', tick, rate);
+      }
+      if (!program.images) {
+        return cb();
+      }
+
       applyImagesMap(assetsMap, imagesMap, cb);
     },
     function(cb) {
-      // Do it only if the "images" feature is turned on.
-      // Temporrary solution, to experiment with it first.
       if (program.images) {
         log(' %s applyed gathered images to assets', tick);
       }
 
       gzipAssets(assetsMap, cb);
     },
-    function(oldSize, newSize, cb) {
-      var rate = 100 - ~~(newSize / (oldSize / 100));
+    function(rate, cb) {
       log(' %s gzipped all gzippable \t\t \033[90m%s%\033[39m', tick, rate);
 
-      // Don't do anything if "images" feature is not turned on.
-      // Temporrary solution, to experiment with it first.
       if (!program.images) {
         return cb();
       }
@@ -121,12 +139,9 @@ var tick = '\033[32m✓\033[39m';
       createImagesMapFile(imagesMap, outDir, cb);
     },
     function(cb) {
-      // Do it only if the "images" feature is turned on.
-      // Temporrary solution, to experiment with it first.
       if (program.images) {
         log(' %s created images map file \t\t \033[90m%s\033[39m', tick, cfg.IMAGES_MAP_FILE);
       }
-
       createAssetsMapFile(assetsMap, outDir, cb);
     },
     function(cb) {
@@ -150,7 +165,6 @@ var tick = '\033[32m✓\033[39m';
       console.error(' error: %s', err.message);
       process.exit(1);
     }
-
     log(' %s removed tmp directory  \t\t \033[90m%s\033[39m', tick, tmpDir);
     log(' done!');
   });
@@ -316,9 +330,9 @@ function createAssetsMapFile(assetsMap, distDir, cb) {
 /*
  *
  */
-function createImagesMapFile(assetsMap, distDir, cb) {
+function createImagesMapFile(imagesMap, distDir, cb) {
   // TODO: Tmp solution for moving images map file out of site_media dir
-  fs.writeFile(cfg.IMAGES_MAP_FILE, JSON.stringify(assetsMap), cb);
+  fs.writeFile(cfg.IMAGES_MAP_FILE, JSON.stringify(imagesMap), cb);
 }
 
 /*
@@ -741,6 +755,92 @@ function gatherImages(dirPath, outDirPath, cb) {
 /*
  *
  */
+function optimizePNG(dirPath, imagesMap, cb) {
+  var execFile = require('child_process').execFile;
+  var oldSize = 0;
+
+  var files = _.map(imagesMap, function(fileName) {
+    return path.join(dirPath, fileName);
+  });
+  files = _.filter(files, function(filePath) {
+    return ~filePath.indexOf('.png');
+  });
+
+  async.waterfall([
+    function(cb) {
+      sumFilesSize(files, cb);
+    },
+    function(size, cb) {
+      oldSize = size;
+      execFile('optipng', ['-o7'].concat(filesPng), {
+        maxBuffer: Infinity
+      }, cb);
+    },
+    function(so, se, cb) {
+      sumFilesSize(files, cb);
+    }
+  ], function(err, newSize) {
+    if (err) return cb(err);
+    cb(null, 100 - ~~(newSize / (oldSize / 100)));
+  });
+}
+
+/*
+ *
+ */
+function optimizeJPEG(dirPath, imagesMap, cb) {
+  var execFile = require('child_process').execFile;
+  var oldSize = 0;
+
+  var files = _.map(imagesMap, function(fileName) {
+    return path.join(dirPath, fileName);
+  });
+  files = _.filter(files, function(filePath) {
+    return ~filePath.indexOf('.jpg') ||
+           ~filePath.indexOf('.jpeg');
+  });
+
+  async.waterfall([
+    function(cb) {
+      sumFilesSize(files, cb);
+    },
+    function(size, cb) {
+      oldSize = size;
+
+      async.forEachSeries(files, function(filePath, cb) {
+        var args = [
+          '-optimize'
+        , '-copy', 'none'
+        , '-outfile', filePath
+        , filePath
+        ];
+        execFile('jpegtran', args, cb);
+      }, cb);
+    },
+    function(cb) {
+      sumFilesSize(files, cb);
+    }
+  ], function(err, newSize) {
+    if (err) return cb(err);
+    cb(null, 100 - ~~(newSize / (oldSize / 100)));
+  });
+}
+
+/*
+ *
+ */
+function sumFilesSize(filesPath, cb) {
+  async.reduce(filesPath, 0, function(size, filePath, cb) {
+    fs.stat(filePath, function(err, stat) {
+      if (err) return cb(err);
+      cb(null, size + stat.size);
+    });
+  }, cb);
+}
+
+/*
+ *
+ */
 function applyImagesMap(assetsMap, imagesMap, cb) {
   eachAsset(assetsMap, function(filePath, p, cb) {
     readFile(filePath, function(err, content) {
@@ -832,9 +932,7 @@ function gzipAssets(assetsMap, cb) {
     });
   }, function(err) {
     if (err) return cb(err);
-    cb(null
-    , oldTotalSize
-    , newTotalSize);
+    cb(null, 100 - ~~(newTotalSize / (oldTotalSize / 100)));
   });
 }
 
