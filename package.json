@@ -6,6 +6,7 @@
   "dependencies": {
     "enhance-css": "*",
     "commander": "*",
+    "progress": "*",
     "uglify-js": "1.x",
     "sprintf": "0.x",
     "lodash": "0.x",

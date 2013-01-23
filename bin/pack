@@ -13,6 +13,8 @@ var package = require('../package.json')
   , _ = require('lodash')
   , fs = require('fs');
 
+var utils = require('../lib/utils');
+
 /**
  * CLI
  */
@@ -39,7 +41,14 @@ try {
   process.exit(1);
 }
 
+// green tick symbol
 var tick = '\033[32m✓\033[39m';
+
+// short cut for the utils.log
+var log = utils.log;
+
+// short cut for the utils.falog
+var falog = utils.falog;
 
 /**
  * Pack
@@ -54,121 +63,132 @@ var tick = '\033[32m✓\033[39m';
     outDir = program.output;
   }
 
-  var assetsMap;
-  var imagesMap;
-  
-  async.waterfall([
-    function(cb) {
+  var scope = {
+    tmpDir: tmpDir
+  , outDir: outDir
+  };
+
+  var stack = [
+    function(scope, cb) {
       fs.mkdir(tmpDir, cb);
     },
-    function(cb) {
+    function(scope, cb) {
       log(' %s created temp directory \t\t \033[90m%s\033[39m', tick, tmpDir);
-      getPagesToPack(program.args, cb);
+      getPagesToPack(program.args, function(err, pages) {
+        if (err) return cb(err);
+        scope.pages = pages;
+        cb();
+      });
     },
-    function(pages, cb) {
-      buildPagesDist(pages, tmpDir, cb);
-    },
-    function(map, cb) {
-      assetsMap = map;
-
-      if (!program.mark) {
-        return cb(null, null);
-      }
-
-      markAssets(assetsMap, cb);
-    },
-    function(map, cb) {
-      if (program.mark) {
-        log(' %s marked assets with md5 checksum', tick);
-        assetsMap = map;
-      }
-      if (!program.images) {
-        return cb(null, null);
-      }
-      
-      gatherImages(cfg.STATIC_ROOT, tmpDir, cb);
-    },
-    function(map, cb) {
-      if (!program.images) {
-        return cb(null, null);
-      }
-
-      log(' %s gathered all existing images', tick);
-
-      imagesMap = map;
-
-      if (!program.optimize) {
-        return cb(null, null);
-      }
-
-      optimizeJPEG(tmpDir, imagesMap, cb);
-    },
-    function(rate, cb) {
-      if (!program.optimize) {
-        return cb(null, null);
-      }
-
-      log(' %s optimized JPEG images with jpegtran  \t\t \033[90m%s%\033[39m', tick, rate);
-
-      optimizePNG(tmpDir, imagesMap, cb);
-    },
-    function(rate, cb) {
-      if (program.optimize) {
-        log(' %s optimized PNG images with optipng  \t\t \033[90m%s%\033[39m', tick, rate);
-      }
-      if (!program.images) {
-        return cb();
-      }
-
-      applyImagesMap(assetsMap, imagesMap, cb);
-    },
-    function(cb) {
-      if (program.images) {
-        log(' %s applyed gathered images to assets', tick);
-      }
-
-      gzipAssets(assetsMap, cb);
-    },
-    function(rate, cb) {
-      log(' %s gzipped all gzippable \t\t \033[90m%s%\033[39m', tick, rate);
-
-      if (!program.images) {
-        return cb();
-      }
-
-      createImagesMapFile(imagesMap, outDir, cb);
-    },
-    function(cb) {
-      if (program.images) {
-        log(' %s created images map file \t\t \033[90m%s\033[39m', tick, cfg.IMAGES_MAP_FILE);
-      }
-      createAssetsMapFile(assetsMap, outDir, cb);
-    },
-    function(cb) {
-      log(' %s created assets map file \t\t \033[90m%s\033[39m', tick, cfg.ASSETS_MAP_FILE);
-      updateDistVersion(ver, cb);
-    },
-    function(cb) {
-      log(' %s created "latest version" file \t \033[90m%s\033[39m', tick, cfg.VERSION_FILE);
-      fs.mkdir(outDir, cb);
-    },
-    function(cb) {
-      log(' %s created dist directory \t\t \033[90m%s\033[39m', tick, outDir);
-      moveFilesToDist(tmpDir, outDir, cb);
-    },
-    function(cb) {
-      log(' %s moved files to the dist directory \t \033[90m%s\033[39m', tick, outDir);
-      removeDir(tmpDir, cb);
+    function(scope, cb) {
+      buildPagesDist(scope.pages, tmpDir, function(err, assetsMap) {
+        if (err) return cb(err);
+        scope.assetsMap = assetsMap;
+        cb();
+      });
     }
-  ], function(err) {
+  ];
+
+  if (program.mark) {
+    stack.push(function(scope, cb) {
+      markAssets(scope.assetsMap, function(err, assetsMap) {
+        if (err) return cb(err);
+        log(' %s marked assets with md5 checksum', tick);
+        scope.assetsMap = assetsMap;
+        cb();
+      });
+    });
+  }
+
+  if (program.images) {
+    stack.push(function(scope, cb) {
+      gatherImages(cfg.STATIC_ROOT, tmpDir, function(err, imagesMap) {
+        if (err) return cb(err);
+        log(' %s gathered all existing images', tick);
+        scope.imagesMap = imagesMap;
+        cb();
+      });
+    });
+
+    stack.push(function(scope, cb) {
+      applyImagesMap(scope.assetsMap, scope.imagesMap, function(err) {
+        if (err) return cb(err);
+        log(' %s applyed gathered images to assets', tick);
+        cb();
+      });
+    });
+
+    stack.push(function(scope, cb) {
+      createImagesMapFile(scope.imagesMap, outDir, function(err) {
+        if (err) return cb(err);
+        log(' %s created images map file \t\t \033[90m%s\033[39m', tick, cfg.IMAGES_MAP_FILE);
+        cb();
+      });
+    });
+  }
+
+  if (program.images && program.optimize) {
+    stack.push(require('../lib/mw-optimize'));
+  }
+
+  stack.push(function(scope, cb) {
+    gzipAssets(scope.assetsMap, function(err, rate) {
+      if (err) return cb(err);
+      log(' %s gzipped all gzippable \t\t \033[90m%s%\033[39m', tick, rate);
+      cb();
+    });
+  });
+
+  stack.push(function(scope, cb) {
+    createAssetsMapFile(scope.assetsMap, outDir, function(err) {
+      if (err) return cb(err);
+      log(' %s created assets map file \t\t \033[90m%s\033[39m', tick, cfg.ASSETS_MAP_FILE);
+      cb();
+    });
+  });
+
+
+  stack.push(function(scope, cb) {
+    updateDistVersion(ver, function(err) {
+      if (err) return cb(err);
+      log(' %s created "latest version" file \t \033[90m%s\033[39m', tick, cfg.VERSION_FILE);
+      cb();
+    });
+  });
+
+  stack.push(function(scope, cb) {
+    fs.mkdir(outDir, function(err) {
+      if (err) return cb(err);
+      log(' %s created dist directory \t\t \033[90m%s\033[39m', tick, outDir);
+      cb();
+    });
+  });
+
+  stack.push(function(scope, cb) {
+    moveFilesToDist(tmpDir, outDir, function(err) {
+      if (err) return cb(err);
+      log(' %s moved files to the dist directory \t \033[90m%s\033[39m', tick, outDir);
+      cb();
+    });
+  });
+
+  stack.push(function(scope, cb) {
+    removeDir(tmpDir, function(err) {
+      if (err) return cb(err);
+      log(' %s removed tmp directory  \t\t \033[90m%s\033[39m', tick, tmpDir);
+      cb();
+    });
+  });
+  
+  async.forEachSeries(stack, function(mw, cb) {
+    mw(scope, cb);
+  }, function(err) {
     if (err) {
       console.error(' error: %s', err.message);
       process.exit(1);
     }
-    log(' %s removed tmp directory  \t\t \033[90m%s\033[39m', tick, tmpDir);
     log(' done!');
   });
-
 })();
 
 /*
@@ -755,92 +775,6 @@ function gatherImages(dirPath, outDirPath, cb) {
 /*
  *
  */
-function optimizePNG(dirPath, imagesMap, cb) {
-  var execFile = require('child_process').execFile;
-  var oldSize = 0;
-
-  var files = _.map(imagesMap, function(fileName) {
-    return path.join(dirPath, fileName);
-  });
-  files = _.filter(files, function(filePath) {
-    return ~filePath.indexOf('.png');
-  });
-
-  async.waterfall([
-    function(cb) {
-      sumFilesSize(files, cb);
-    },
-    function(size, cb) {
-      oldSize = size;
-      execFile('optipng', ['-o7'].concat(filesPng), {
-        maxBuffer: Infinity
-      }, cb);
-    },
-    function(so, se, cb) {
-      sumFilesSize(files, cb);
-    }
-  ], function(err, newSize) {
-    if (err) return cb(err);
-    cb(null, 100 - ~~(newSize / (oldSize / 100)));
-  });
-}
-
-/*
- *
- */
-function optimizeJPEG(dirPath, imagesMap, cb) {
-  var execFile = require('child_process').execFile;
-  var oldSize = 0;
-
-  var files = _.map(imagesMap, function(fileName) {
-    return path.join(dirPath, fileName);
-  });
-  files = _.filter(files, function(filePath) {
-    return ~filePath.indexOf('.jpg') ||
-           ~filePath.indexOf('.jpeg');
-  });
-
-  async.waterfall([
-    function(cb) {
-      sumFilesSize(files, cb);
-    },
-    function(size, cb) {
-      oldSize = size;
-
-      async.forEachSeries(files, function(filePath, cb) {
-        var args = [
-          '-optimize'
-        , '-copy', 'none'
-        , '-outfile', filePath
-        , filePath
-        ];
-        execFile('jpegtran', args, cb);
-      }, cb);
-    },
-    function(cb) {
-      sumFilesSize(files, cb);
-    }
-  ], function(err, newSize) {
-    if (err) return cb(err);
-    cb(null, 100 - ~~(newSize / (oldSize / 100)));
-  });
-}
-
-/*
- *
- */
-function sumFilesSize(filesPath, cb) {
-  async.reduce(filesPath, 0, function(size, filePath, cb) {
-    fs.stat(filePath, function(err, stat) {
-      if (err) return cb(err);
-      cb(null, size + stat.size);
-    });
-  }, cb);
-}
-
-/*
- *
- */
 function applyImagesMap(assetsMap, imagesMap, cb) {
   eachAsset(assetsMap, function(filePath, p, cb) {
     readFile(filePath, function(err, content) {
@@ -974,30 +908,4 @@ function eachAsset(map, iter, cb) {
 
     }, cb);
   }, cb);
-}
-
-/*
- * Simple log
- */
-function log() {
-  if (program.verbose) {
-    console.log.apply(console, arguments);
-  }
-}
-
-/*
- * File action log
- */
-function falog(msg, stat) {
-  log('   %s %s \033[90m%s kb\033[39m', tick, msg, kb(stat.size));
-}
-
-/**
- * Returns size value in kilobites
- *
- * @param size integer
- * @return float
- */
-function kb(size) {
-  return ~~(size / 1024 * 100) / 100;
 }
