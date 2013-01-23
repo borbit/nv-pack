@@ -51,7 +51,7 @@ var tick = '\033[32m✓\033[39m';
   
   async.waterfall([
     function(cb) {
-      createDir(tmpDir, cb);
+      fs.mkdir(tmpDir, cb);
     },
     function(cb) {
       log(' %s created temp directory \t\t \033[90m%s\033[39m', tick, tmpDir);
@@ -135,7 +135,7 @@ var tick = '\033[32m✓\033[39m';
     },
     function(cb) {
       log(' %s created "latest version" file \t \033[90m%s\033[39m', tick, cfg.VERSION_FILE);
-      createDir(outDir, cb);
+      fs.mkdir(outDir, cb);
     },
     function(cb) {
       log(' %s created dist directory \t\t \033[90m%s\033[39m', tick, outDir);
@@ -602,33 +602,8 @@ function concatFiles(files, each, cb) {
 /*
  *
  */
-function createDir(path, cb) {
-  fs.mkdir(path, cb);
-}
-
-/*
- *
- */
 function removeDir(path, cb) {
   rimraf(path, cb);
-}
-
-/*
- *
- */
-function createDirs(dirs, cb) {
-  async.forEachSeries(dirs, function(dir, cb) {
-    fs.mkdir(dir, cb);
-  }, cb);
-}
-
-/*
- *
- */
-function createFiles(files, cb) {
-  async.forEachSeries(files, function(file, cb) {
-    fs.writeFile(file, '', cb);
-  }, cb);
 }
 
 /*
@@ -641,20 +616,6 @@ function getSources(name) {
     return _.extend({}, require(getPageSrcsPath(name)),
       _.pick(require(getCmnSrcsPath()), 'includes'));
   }
-}
-
-/*
- *
- */
-function getPageDirPath(name) {
-  return sprintf('%s/%s', cfg.PAGES_ROOT, name);
-}
-
-/*
- *
- */
-function getPageTmplPath(name) {
-  return sprintf('%s/%2$s/%2$s.html', cfg.PAGES_ROOT, name);
 }
 
 /*
@@ -676,15 +637,6 @@ function getCmnSrcsPath() {
  */
 function updateDistVersion(version, cb) {
   fs.writeFile(cfg.VERSION_FILE, JSON.stringify(version), cb);
-}
-
-/*
- *
- */
-function createDistDir(version) {
-  var dist = path.join(cfg.DISTS_ROOT, version);
-  fs.mkdirSync(dist);
-  return dist;
 }
 
 /*
