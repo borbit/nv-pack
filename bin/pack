@@ -24,10 +24,12 @@ program
   .version(package.version)
   .usage('[options] [pages]')
   .option('-v, --verbose'    , 'verbose output')
+  .option('-o, --out <path>' , 'package output dir')
   .option('-m, --mark'       , 'add checksum to processed file names')
   .option('-i, --images'     , 'include all blocks\' images into the package')
   .option('-e, --optimize'   , 'optimize images included into the package')
-  .option('-o, --out <path>' , 'package output dir')
+  .option('-g, --gzip'       , 'gzip everything can be gzipped')
+  .option('-a, --all'        , 'combine -m -i -e -g')
   .parse(process.argv);
 
 var cwd = process.cwd();
@@ -56,10 +58,18 @@ var falog = utils.falog;
   var ver = Date.now().toString();
   var tmpDir = path.join(cfg.TEMPS_ROOT, ver);
   var outDir = path.join(cfg.DISTS_ROOT, ver);
+
+  // Combine -m -i -e -g
+  if (program.all) {
+    program.mark = 
+    program.images = 
+    program.optimize = 
+    program.gzip = true;
+  }
   
   // Explicitly set output dir
-  if (program.output) {
-    outDir = program.output;
+  if (program.out) {
+    outDir = program.out;
   }
 
   var scope = {
@@ -89,13 +99,16 @@ var falog = utils.falog;
   if (program.images && program.optimize) {
     stack.push(require('../lib/mw/optimize'));
   }
-
-  stack.push(require('../lib/mw/gzip'));
+  if (program.gzip) {
+    stack.push(require('../lib/mw/gzip'));
+  }
 
   stack.push(function(scope, cb) {
-    createAssetsMapFile(scope.assetsMap, tmpDir, function(err) {
+    var filePath = cfg.ASSETS_MAP_FILE || path.join(tmpDir, 'assets.json');
+
+    createAssetsMapFile(scope.assetsMap, filePath, function(err) {
       if (err) return cb(err);
-      log(' %s created assets map file \t\t\t \033[90m%s\033[39m', tick, cfg.ASSETS_MAP_FILE);
+      log(' %s created assets map file \t\t\t \033[90m%s\033[39m', tick, filePath);
       cb();
     });
   });
@@ -147,7 +160,7 @@ var falog = utils.falog;
 /*
  *
  */
-function createAssetsMapFile(assetsMap, tmpDir, cb) {
+function createAssetsMapFile(assetsMap, filePath, cb) {
   var map = {};
 
   _.each(assetsMap, function(assets, page) {
@@ -167,8 +180,6 @@ function createAssetsMapFile(assetsMap, tmpDir, cb) {
     if (_.size(js))
       map[page].js = js;
   });
-
-  var filePath = cfg.ASSETS_MAP_FILE || path.join(tmpDir, 'assets.json');
 
   fs.writeFile(filePath, JSON.stringify(map), cb);
 }
