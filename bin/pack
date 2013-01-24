@@ -1,6 +1,11 @@
 #!/usr/bin/env node
 
 /**
+ * TODO:
+ * 1) images.json should be placed to a dist dir.
+ */
+
+/**
  * Module dependencies.
  */
 var package = require('../package.json')
@@ -66,6 +71,7 @@ var falog = utils.falog;
   var scope = {
     tmpDir: tmpDir
   , outDir: outDir
+  , cfg: cfg
   };
 
   var stack = [
@@ -101,32 +107,8 @@ var falog = utils.falog;
   }
 
   if (program.images) {
-    stack.push(function(scope, cb) {
-      gatherImages(cfg.STATIC_ROOT, tmpDir, function(err, imagesMap) {
-        if (err) return cb(err);
-        log(' %s gathered all existing images', tick);
-        scope.imagesMap = imagesMap;
-        cb();
-      });
-    });
-
-    stack.push(function(scope, cb) {
-      applyImagesMap(scope.assetsMap, scope.imagesMap, function(err) {
-        if (err) return cb(err);
-        log(' %s applyed gathered images to assets', tick);
-        cb();
-      });
-    });
-
-    stack.push(function(scope, cb) {
-      createImagesMapFile(scope.imagesMap, outDir, function(err) {
-        if (err) return cb(err);
-        log(' %s created images map file \t\t \033[90m%s\033[39m', tick, cfg.IMAGES_MAP_FILE);
-        cb();
-      });
-    });
+    stack.push(require('../lib/mw-images'));
   }
-
   if (program.images && program.optimize) {
     stack.push(require('../lib/mw-optimize'));
   }
@@ -146,7 +128,6 @@ var falog = utils.falog;
       cb();
     });
   });
-
 
   stack.push(function(scope, cb) {
     updateDistVersion(ver, function(err) {
@@ -350,14 +331,6 @@ function createAssetsMapFile(assetsMap, distDir, cb) {
 /*
  *
  */
-function createImagesMapFile(imagesMap, distDir, cb) {
-  // TODO: Tmp solution for moving images map file out of site_media dir
-  fs.writeFile(cfg.IMAGES_MAP_FILE, JSON.stringify(imagesMap), cb);
-}
-
-/*
- *
- */
 function collectJS(files, dist, cb) {
   files = _.map(files, function(file) {
     return cfg.STATIC_ROOT + '/' + file;
@@ -382,7 +355,7 @@ function compressJS(file, cb) {
 
   async.waterfall([
     function(cb) {
-      readFile(file, cb);
+      utils.readFile(file, cb);
     },
     function(cont, cb) {
       var ast = jsp.parse(cont);
@@ -390,7 +363,7 @@ function compressJS(file, cb) {
       ast = pro.ast_mangle(ast);
       ast = pro.ast_squeeze(ast);
 
-      writeFile(file, pro.gen_code(ast), cb);
+      utils.writeFile(file, pro.gen_code(ast), cb);
     }
   ], cb);
 }
@@ -437,7 +410,7 @@ function compileLess(lesses, inclds, dist, cb) {
       // Cancat all less files before rendering and patch
       // all the image urls to be relative to the static dir
       async.concatSeries(files, function(file, cb) {
-        readFile(dir + file, function(err, cont) {
+        utils.readFile(dir + file, function(err, cont) {
           if (err) return cb(err);
           var sub = 'background-image: url("';
           var rep = 'background-image: url("' + path.dirname(file) + '/';
@@ -462,10 +435,10 @@ function optimizeCSS(file, cb) {
 
   async.waterfall([
     function(cb) {
-      readFile(file, cb);
+      utils.readFile(file, cb);
     },
     function(cont, cb) {
-      writeFile(file, ccso.justDoIt(cont), cb);
+      utils.writeFile(file, ccso.justDoIt(cont), cb);
     }
   ], cb);
 }
@@ -502,13 +475,13 @@ function embedBase64(file, cb) {
 
   async.waterfall([
     function(cb) {
-      readFile(file, cb);
+      utils.readFile(file, cb);
     },
     function(cont, cb) {
       enhance.process(cont, cb)
     },
     function(cont, cb) {
-      writeFile(file, cont.embedded.plain, cb);
+      utils.writeFile(file, cont.embedded.plain, cb);
     }
   ], cb);
 }
@@ -521,85 +494,13 @@ function gzip(from, to, cb) {
 
   async.waterfall([
     function(cb) {
-      readFile(from, cb);
+      utils.readFile(from, cb);
     },
     function(cont, cb) {
       zlib.gzip(cont, cb)
     },
     function(cont, cb) {
-      writeFile(to, cont, cb);
-    }
-  ], cb);
-}
-
-/*
- * Renames file adding md5 checksum of its content.
- * Passes new name to the callback function.
- * 
- * @param filePath string
- * @param outDirPath string (optional)
- * @param cb fucntion
- */
-function markFile(filePath, outDirPath, cb) {
-  // if outDirPath is not provided
-  if (!cb) {
-    cb = outDirPath;
-    outDirPath = null;
-  }
-
-  readFile(filePath, function(err, cont) {
-    if (err) return cb(err);
-
-    var fileName = path.basename(filePath);
-    var md5 = crypto.createHash('md5');
-    md5 = md5.update(cont);
-    md5 = md5.digest('hex');
-
-    var chunks = fileName.split('.');
-    var mark = md5.substr(0, 15);
-    
-    chunks.splice(chunks.length-1, 0, mark);
-
-    var newName = chunks.join('.');
-
-    if (outDirPath) {
-      var newPath = path.join(outDirPath, newName);
-      var rStream = fs.createReadStream(filePath);
-      var wStream = fs.createWriteStream(newPath);
-      rStream.pipe(wStream);
-      rStream.on('end', function(err) {
-        if (err) return cb(err);
-        cb(null, newPath);
-      });
-    } else {
-      var dirPath = path.dirname(filePath);
-      var newPath = path.join(dirPath, newName);
-
-      fs.rename(filePath, newPath, function(err) {
-        if (err) return cb(err);
-        cb(null, newPath);
-      });
-    }
-  });
-}
-
-/*
- *
- */
-function readFile(filePath, cb) {
-  fs.readFile(filePath, 'utf8', cb);
-}
-
-/*
- *
- */
-function writeFile(file, cont, cb) {
-  async.waterfall([
-    function(cb) {
-      fs.writeFile(file, cont, cb);
-    },
-    function(cb) {
-      fs.stat(file, cb);
+      utils.writeFile(to, cont, cb);
     }
   ], cb);
 }
@@ -627,7 +528,7 @@ function concatFiles(files, each, cb) {
     each = null;
   }
 
-  async.concatSeries(files, readFile, function(err, res) {
+  async.concatSeries(files, utils.readFile, function(err, res) {
     if (err) return cb(err);
     cb(null, res.join(''));
   });
@@ -747,88 +648,14 @@ function getPagesToPack(pages, cb) {
   });
 }
 
-/*
- *
- */
-function gatherImages(dirPath, outDirPath, cb) {
-  findImages(dirPath, function(err, list) {
-    if (err) return cb(err);
-
-    var map = {};
-
-    async.forEach(list, function(imgPath, cb) {
-      markFile(imgPath, outDirPath, function(err, newPath) {
-        if (err) return cb(err);
-
-        var orgImgUrl = imgPath.replace(dirPath + '/', '');
-        var newImgUrl = newPath.replace(outDirPath + '/', '');
-        map[orgImgUrl] = newImgUrl;
-        cb();
-      });
-    }, function(err) {
-      if (err) return cb(err);
-      cb(null, map);
-    });
-  });
-}
-
-/*
- *
- */
-function applyImagesMap(assetsMap, imagesMap, cb) {
-  eachAsset(assetsMap, function(filePath, p, cb) {
-    readFile(filePath, function(err, content) {
-      if (err) return cb(err);
-
-      _.each(imagesMap, function(newUrl, orgUrl) {
-        content = content.split(orgUrl).join(newUrl);
-      });
-      
-      writeFile(filePath, content, cb);
-    });
-  }, cb);
-}
-
-/*
- *
- */
-function findImages(dirPath, cb) {
-  fs.readdir(dirPath, function(err, list) {
-    if (err) return cb(err);
-
-    var images = _.filter(list, function(fileName) {
-      return ~fileName.indexOf('.jpg')
-          || ~fileName.indexOf('.jpeg')
-          || ~fileName.indexOf('.webp') //soon
-          || ~fileName.indexOf('.png')
-          || ~fileName.indexOf('.gif');
-    });
-
-    images = _.map(images, function(fileName) {
-      return path.join(dirPath, fileName);
-    });
-
-    filterDirs(list, dirPath, function(dirs) {
-      dirs = _.map(dirs, function(dirName) {
-        return path.join(dirPath, dirName);
-      });
-
-      async.concat(dirs, findImages, function(err, other) {
-        if (err) return cb(err);
-        cb(null, images.concat(other));
-      });
-    });
-  });
-}
-
 /**
  *
  */
 function markAssets(map, cb) {
   var marked = {};
 
-  eachAsset(map, function(filePath, p, cb) {
-    markFile(filePath, function(err, newPath) {
+  utils.eachAsset(map, function(filePath, p, cb) {
+    utils.markFile(filePath, function(err, newPath) {
       if (err) return cb(err);
 
       var inpage = marked[p.page] || (marked[p.page] = {});
@@ -850,7 +677,7 @@ function gzipAssets(assetsMap, cb) {
   var oldTotalSize = 0;
   var newTotalSize = 0;
   
-  eachAsset(assetsMap, function(filePath, p, cb) {
+  utils.eachAsset(assetsMap, function(filePath, p, cb) {
     var gzPath = filePath + '.gz';
 
     fs.stat(filePath, function(err, oldStat) {
@@ -868,44 +695,4 @@ function gzipAssets(assetsMap, cb) {
     if (err) return cb(err);
     cb(null, 100 - ~~(newTotalSize / (oldTotalSize / 100)));
   });
-}
-
-/**
- *
- */
-function filterDirs(list, rootPath, cb) {
-  async.filter(list, function(fileName, cb) {
-    var filePath = path.join(rootPath, fileName);
-
-    fs.stat(filePath, function(err, stat) {
-      if (err) return cb(err);
-      cb(stat.isDirectory());
-    });
-  }, cb);
-}
-
-/**
- *
- */
-function eachAsset(map, iter, cb) {
-  var pages = _.keys(map);
-
-  async.forEach(pages, function(page, cb) {
-    var groups = _.keys(map[page]);
-    var inpage = map[page];
-
-    async.forEach(groups, function(group, cb) {
-      var assets = _.keys(inpage[group]);
-      var ingroup = inpage[group];
-
-      async.forEach(assets, function(asset, cb) {
-        iter(ingroup[asset], {
-          page  : page
-        , group : group
-        , asset : asset
-        }, cb);
-      }, cb);
-
-    }, cb);
-  }, cb);
 }
