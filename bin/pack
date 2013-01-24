@@ -78,19 +78,19 @@ var falog = utils.falog;
     });
   });
 
-  stack.push(require('../lib/mw-build'));
+  stack.push(require('../lib/mw/build'));
 
   if (program.mark) {
-    stack.push(require('../lib/mw-mark'));
+    stack.push(require('../lib/mw/mark'));
   }
   if (program.images) {
-    stack.push(require('../lib/mw-images'));
+    stack.push(require('../lib/mw/images'));
   }
   if (program.images && program.optimize) {
-    stack.push(require('../lib/mw-optimize'));
+    stack.push(require('../lib/mw/optimize'));
   }
 
-  stack.push(require('../lib/mw-gzip'));
+  stack.push(require('../lib/mw/gzip'));
 
   stack.push(function(scope, cb) {
     createAssetsMapFile(scope.assetsMap, tmpDir, function(err) {
