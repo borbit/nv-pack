@@ -93,7 +93,7 @@ var falog = utils.falog;
   stack.push(require('../lib/mw-gzip'));
 
   stack.push(function(scope, cb) {
-    createAssetsMapFile(scope.assetsMap, outDir, function(err) {
+    createAssetsMapFile(scope.assetsMap, tmpDir, function(err) {
       if (err) return cb(err);
       log(' %s created assets map file \t\t\t \033[90m%s\033[39m', tick, cfg.ASSETS_MAP_FILE);
       cb();
@@ -147,7 +147,7 @@ var falog = utils.falog;
 /*
  *
  */
-function createAssetsMapFile(assetsMap, distDir, cb) {
+function createAssetsMapFile(assetsMap, tmpDir, cb) {
   var map = {};
 
   _.each(assetsMap, function(assets, page) {
@@ -168,8 +168,9 @@ function createAssetsMapFile(assetsMap, distDir, cb) {
       map[page].js = js;
   });
 
-  // TODO: Tmp solution for moving assets map file out of site_media dir
-  fs.writeFile(cfg.ASSETS_MAP_FILE, JSON.stringify(map), cb);
+  var filePath = cfg.ASSETS_MAP_FILE || path.join(tmpDir, 'assets.json');
+
+  fs.writeFile(filePath, JSON.stringify(map), cb);
 }
 
 /*
