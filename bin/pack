@@ -3,22 +3,19 @@
 /**
  * TODO:
  * 1) images.json should be placed to a dist dir.
+ * 2) convert images to the WEBP format
  */
 
 /**
  * Module dependencies.
  */
 var package = require('../package.json')
-  , sprintf = require('sprintf').sprintf
+  , utils = require('../lib/utils')
   , program = require('commander')
-  , rimraf = require('rimraf')
-  , crypto = require('crypto')
   , async = require('async')
   , path = require('path')
   , _ = require('lodash')
   , fs = require('fs');
-
-var utils = require('../lib/utils');
 
 /**
  * CLI
@@ -29,7 +26,6 @@ program
   .option('-v, --verbose'    , 'verbose output')
   .option('-m, --mark'       , 'add checksum to processed file names')
   .option('-i, --images'     , 'include all blocks\' images into the package')
-  .option('-s, --sprites'    , 'build sprites and include them into the package')
   .option('-e, --optimize'   , 'optimize images included into the package')
   .option('-o, --out <path>' , 'package output dir')
   .parse(process.argv);
@@ -48,10 +44,8 @@ try {
 
 // green tick symbol
 var tick = '\033[32m✓\033[39m';
-
 // short cut for the utils.log
 var log = utils.log;
-
 // short cut for the utils.falog
 var falog = utils.falog;
 
@@ -79,7 +73,7 @@ var falog = utils.falog;
   stack.push(function(scope, cb) {
     fs.mkdir(tmpDir, function(err, pages) {
       if (err) return cb(err);
-      log(' %s created temp directory \t\t \033[90m%s\033[39m', tick, tmpDir);
+      log(' %s created temp directory \t\t\t \033[90m%s\033[39m', tick, tmpDir);
       cb();
     });
   });
@@ -87,16 +81,8 @@ var falog = utils.falog;
   stack.push(require('../lib/mw-build'));
 
   if (program.mark) {
-    stack.push(function(scope, cb) {
-      markAssets(scope.assetsMap, function(err, assetsMap) {
-        if (err) return cb(err);
-        log(' %s marked assets with md5 checksum', tick);
-        scope.assetsMap = assetsMap;
-        cb();
-      });
-    });
+    stack.push(require('../lib/mw-mark'));
   }
-
   if (program.images) {
     stack.push(require('../lib/mw-images'));
   }
@@ -104,26 +90,20 @@ var falog = utils.falog;
     stack.push(require('../lib/mw-optimize'));
   }
 
-  stack.push(function(scope, cb) {
-    gzipAssets(scope.assetsMap, function(err, rate) {
-      if (err) return cb(err);
-      log(' %s gzipped all gzippable \t\t \033[90m%s%\033[39m', tick, rate);
-      cb();
-    });
-  });
+  stack.push(require('../lib/mw-gzip'));
 
   stack.push(function(scope, cb) {
     createAssetsMapFile(scope.assetsMap, outDir, function(err) {
       if (err) return cb(err);
-      log(' %s created assets map file \t\t \033[90m%s\033[39m', tick, cfg.ASSETS_MAP_FILE);
+      log(' %s created assets map file \t\t\t \033[90m%s\033[39m', tick, cfg.ASSETS_MAP_FILE);
       cb();
     });
   });
 
   stack.push(function(scope, cb) {
-    updateDistVersion(ver, function(err) {
+    fs.writeFile(cfg.VERSION_FILE, JSON.stringify(ver), function(err) {
       if (err) return cb(err);
-      log(' %s created "latest version" file \t \033[90m%s\033[39m', tick, cfg.VERSION_FILE);
+      log(' %s created "latest version" file \t\t \033[90m%s\033[39m', tick, cfg.VERSION_FILE);
       cb();
     });
   });
@@ -131,7 +111,7 @@ var falog = utils.falog;
   stack.push(function(scope, cb) {
     fs.mkdir(outDir, function(err) {
       if (err) return cb(err);
-      log(' %s created dist directory \t\t \033[90m%s\033[39m', tick, outDir);
+      log(' %s created dist directory \t\t\t \033[90m%s\033[39m', tick, outDir);
       cb();
     });
   });
@@ -139,15 +119,15 @@ var falog = utils.falog;
   stack.push(function(scope, cb) {
     moveFilesToDist(tmpDir, outDir, function(err) {
       if (err) return cb(err);
-      log(' %s moved files to the dist directory \t \033[90m%s\033[39m', tick, outDir);
+      log(' %s moved files to the dist directory \t\t \033[90m%s\033[39m', tick, outDir);
       cb();
     });
   });
 
   stack.push(function(scope, cb) {
-    removeDir(tmpDir, function(err) {
+    utils.removeDir(tmpDir, function(err) {
       if (err) return cb(err);
-      log(' %s removed tmp directory  \t\t \033[90m%s\033[39m', tick, tmpDir);
+      log(' %s removed tmp directory  \t\t\t \033[90m%s\033[39m', tick, tmpDir);
       cb();
     });
   });
@@ -160,6 +140,7 @@ var falog = utils.falog;
       process.exit(1);
     }
     log(' done!');
+    process.exit();
   });
 })();
 
@@ -194,39 +175,6 @@ function createAssetsMapFile(assetsMap, distDir, cb) {
 /*
  *
  */
-function gzip(from, to, cb) {
-  var zlib = require('zlib');
-
-  async.waterfall([
-    function(cb) {
-      utils.readFile(from, cb);
-    },
-    function(cont, cb) {
-      zlib.gzip(cont, cb)
-    },
-    function(cont, cb) {
-      utils.writeFile(to, cont, cb);
-    }
-  ], cb);
-}
-
-/*
- *
- */
-function removeDir(path, cb) {
-  rimraf(path, cb);
-}
-
-/*
- *
- */
-function updateDistVersion(version, cb) {
-  fs.writeFile(cfg.VERSION_FILE, JSON.stringify(version), cb);
-}
-
-/*
- *
- */
 function moveFilesToDist(tempDir, distDir, cb) {
   async.waterfall([
     function(cb) {
@@ -241,53 +189,4 @@ function moveFilesToDist(tempDir, distDir, cb) {
       }, cb);
     }
   ], cb)
-}
-
-/**
- *
- */
-function markAssets(map, cb) {
-  var marked = {};
-
-  utils.eachAsset(map, function(filePath, p, cb) {
-    utils.markFile(filePath, function(err, newPath) {
-      if (err) return cb(err);
-
-      var inpage = marked[p.page] || (marked[p.page] = {});
-      var ingroup = inpage[p.group] || (inpage[p.group] = {});
-      ingroup[p.asset] = newPath;
-
-      cb();
-    });
-  }, function(err) {
-    if (err) return cb(err);
-    cb(null, marked);
-  });
-}
-
-/**
- *
- */
-function gzipAssets(assetsMap, cb) {
-  var oldTotalSize = 0;
-  var newTotalSize = 0;
-  
-  utils.eachAsset(assetsMap, function(filePath, p, cb) {
-    var gzPath = filePath + '.gz';
-
-    fs.stat(filePath, function(err, oldStat) {
-      if (err) return cb(err);
-      
-      gzip(filePath, gzPath, function(err, newStat) {
-        if (err) return cb(err);
-
-        oldTotalSize += oldStat.size;
-        newTotalSize += newStat.size;
-        cb();
-      });
-    });
-  }, function(err) {
-    if (err) return cb(err);
-    cb(null, 100 - ~~(newTotalSize / (oldTotalSize / 100)));
-  });
 }
