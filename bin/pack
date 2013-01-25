@@ -2,8 +2,7 @@
 
 /**
  * TODO:
- * 1) images.json should be placed to a dist dir.
- * 2) convert images to the WEBP format
+ * 1) convert images to the WEBP format
  */
 
 /**
