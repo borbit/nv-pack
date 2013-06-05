@@ -26,6 +26,7 @@ program
   .option('-o, --out <path>' , 'package output dir')
   .option('-m, --mark'       , 'add checksum to processed file names')
   .option('-i, --images'     , 'include all blocks\' images into the package')
+  .option('-s, --stamp'      , 'add timestamp param to background images')
   .option('-e, --optimize'   , 'optimize images included into the package')
   .option('-g, --gzip'       , 'gzip everything can be gzipped')
   .option('-a, --all'        , 'combine -m -i -e -g')
@@ -60,12 +61,12 @@ var falog = utils.falog;
 
   // Combine -m -i -e -g
   if (program.all) {
-    program.mark = 
-    program.images = 
-    program.optimize = 
+    program.mark =
+    program.images =
+    program.optimize =
     program.gzip = true;
   }
-  
+
   // Explicitly set output dir
   if (program.out) {
     outDir = program.out;
@@ -143,7 +144,7 @@ var falog = utils.falog;
       cb();
     });
   });
-  
+
   async.forEachSeries(stack, function(mw, cb) {
     mw(scope, cb);
   }, function(err) {
