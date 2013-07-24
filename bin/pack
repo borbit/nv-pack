@@ -56,7 +56,7 @@ var falog = utils.falog;
  */
 (function() {
   var ver = Date.now().toString();
-  var tmpDir = path.join(cfg.TEMPS_ROOT, ver);
+  var tmpDir = path.join(cfg.TEMPS_ROOT || '/tmp', ver);
   var outDir = path.join(cfg.DISTS_ROOT, ver);
 
   // Combine -m -i -e -g
