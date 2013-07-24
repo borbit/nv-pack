@@ -16,6 +16,6 @@
     "csso": "*"
   },
   "bin": {
-    "front-pack": "./bin/pack"
+    "nv-pack": "./bin/pack"
   }
 }
