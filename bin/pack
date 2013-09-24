@@ -28,6 +28,7 @@ program
   .option('-i, --images'     , 'include all blocks\' images into the package')
   .option('-s, --stamp'      , 'add timestamp param to background images')
   .option('-e, --optimize'   , 'optimize images included into the package')
+  .option('-r, --readable'   , 'do not compress javascript code')
   .option('-g, --gzip'       , 'gzip everything can be gzipped')
   .option('-a, --all'        , 'combine -m -i -e -g')
   .parse(process.argv);
