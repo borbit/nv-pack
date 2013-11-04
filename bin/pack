@@ -14,7 +14,7 @@ var package = require('../package.json')
   , async = require('async')
   , path = require('path')
   , _ = require('lodash')
-  , fs = require('fs');
+  , fs = require('fs-extra');
 
 /**
  * CLI
@@ -22,24 +22,31 @@ var package = require('../package.json')
 program
   .version(package.version)
   .usage('[options] [pages]')
-  .option('-v, --verbose'    , 'verbose output')
-  .option('-o, --out <path>' , 'package output dir')
-  .option('-m, --mark'       , 'add checksum to processed file names')
-  .option('-i, --images'     , 'include all blocks\' images into the package')
-  .option('-s, --stamp'      , 'add timestamp param to background images')
-  .option('-e, --optimize'   , 'optimize images included into the package')
-  .option('-g, --gzip'       , 'gzip everything can be gzipped')
-  .option('-a, --all'        , 'combine -m -i -e -g')
+  .option('-v, --verbose'       , 'verbose output')
+  .option('-o, --out <path>'    , 'package output dir')
+  .option('-m, --mark'          , 'add checksum to processed file names')
+  .option('-i, --images'        , 'include all blocks\' images into the package')
+  .option('-s, --stamp'         , 'add timestamp param to background images')
+  .option('-e, --optimize'      , 'optimize images included into the package')
+  .option('-r, --readable'      , 'do not compress javascript code')
+  .option('-c, --config <path>' , 'path to config file')
+  .option('-g, --gzip'          , 'gzip everything can be gzipped')
+  .option('-a, --all'           , 'combine -m -i -e -g')
   .parse(process.argv);
 
 var cwd = process.cwd();
+var cfg;
 
 /**
- * Config
+ * Loading config
  */
-try {
-  var cfg = require(path.join(cwd, '/config'));
-} catch (err) {
+try {  
+  if (program.config) {
+    cfg = require(program.config);
+  } else {
+    cfg = require(path.join(cwd, '/config'));
+  }
+} catch (e) {
   console.error(" error: cannot find config file");
   process.exit(1);
 }
@@ -194,10 +201,11 @@ function moveFilesToDist(tempDir, distDir, cb) {
     },
     function(files, cb) {
       async.forEach(files, function(file, cb) {
-        fs.rename(
-          path.join(tempDir, file)
-        , path.join(distDir, file)
-        , cb);
+	var src = path.join(tempDir, file);
+	var dst = path.join(distDir, file);
+        fs.copy(src, dst, function(err) {
+          fs.unlink(src, cb);
+        });
       }, cb);
     }
   ], cb)

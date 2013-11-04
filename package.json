@@ -1,6 +1,6 @@
 {
   "name": "front-pack",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "Build tool for packing static distribution packages. Part of the node-front project.",
   "author": "Serge Borbit <serge.borbit@gmail.com>",
   "dependencies": {
@@ -13,7 +13,8 @@
     "rimraf": "2.x",
     "async": "0.x",
     "less": "1.x",
-    "csso": "*"
+    "csso": "*",
+    "fs-extra": "~0.8.1"
   },
   "bin": {
     "nv-pack": "./bin/pack"
