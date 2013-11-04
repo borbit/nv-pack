@@ -13,7 +13,8 @@
     "rimraf": "2.x",
     "async": "0.x",
     "less": "1.x",
-    "csso": "*"
+    "csso": "*",
+    "fs-extra": "~0.8.1"
   },
   "bin": {
     "nv-pack": "./bin/pack"

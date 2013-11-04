@@ -14,7 +14,7 @@ var package = require('../package.json')
   , async = require('async')
   , path = require('path')
   , _ = require('lodash')
-  , fs = require('fs');
+  , fs = require('fs-extra');
 
 /**
  * CLI
@@ -201,10 +201,11 @@ function moveFilesToDist(tempDir, distDir, cb) {
     },
     function(files, cb) {
       async.forEach(files, function(file, cb) {
-        fs.rename(
-          path.join(tempDir, file)
-        , path.join(distDir, file)
-        , cb);
+	var src = path.join(tempDir, file);
+	var dst = path.join(distDir, file);
+        fs.copy(src, dst, function(err) {
+          fs.unlink(src, cb);
+        });
       }, cb);
     }
   ], cb)
