@@ -1,10 +1,9 @@
 {
   "name": "nv-pack",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Build tool for packing static distribution packages. Part of the node-front project.",
   "author": "Serge Borbit <serge.borbit@gmail.com>",
   "dependencies": {
-    "enhance-css": "*",
     "commander": "*",
     "progress": "*",
     "uglify-js": "1.x",
@@ -14,7 +13,8 @@
     "async": "0.x",
     "less": "1.x",
     "csso": "*",
-    "fs-extra": "~0.8.1"
+    "fs-extra": "~0.8.1",
+    "mime": "*"
   },
   "bin": {
     "nv-pack": "./bin/pack"
