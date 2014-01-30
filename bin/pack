@@ -23,7 +23,7 @@ program
   .version(package.version)
   .usage('[options] [pages]')
   .option('-v, --verbose'       , 'verbose output')
-  .option('-b, --build'         , 'build version')
+  .option('-b, --build <build>' , 'build version')
   .option('-o, --out <path>'    , 'package output dir')
   .option('-m, --mark'          , 'add checksum to processed file names')
   .option('-i, --images'        , 'include all blocks\' images into the package')
