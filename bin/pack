@@ -23,7 +23,7 @@ program
   .version(package.version)
   .usage('[options] [pages]')
   .option('-v, --verbose'       , 'verbose output')
-  .option('-V, --version'       , 'build version')
+  .option('-b, --build'         , 'build version')
   .option('-o, --out <path>'    , 'package output dir')
   .option('-m, --mark'          , 'add checksum to processed file names')
   .option('-i, --images'        , 'include all blocks\' images into the package')
@@ -62,7 +62,7 @@ var falog = utils.falog;
  * Pack
  */
 (function() {
-  var ver = program.version || Date.now().toString();
+  var ver = program.build || Date.now().toString();
   var tmpDir = path.join(cfg.TEMPS_ROOT || '/tmp', ver);
   var outDir = path.join(cfg.DISTS_ROOT, ver);
 
