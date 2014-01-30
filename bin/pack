@@ -23,10 +23,10 @@ program
   .version(package.version)
   .usage('[options] [pages]')
   .option('-v, --verbose'       , 'verbose output')
+  .option('-V, --version'       , 'build version')
   .option('-o, --out <path>'    , 'package output dir')
   .option('-m, --mark'          , 'add checksum to processed file names')
   .option('-i, --images'        , 'include all blocks\' images into the package')
-  .option('-s, --stamp'         , 'add timestamp param to background images')
   .option('-e, --optimize'      , 'optimize images included into the package')
   .option('-r, --readable'      , 'do not compress javascript code')
   .option('-c, --config <path>' , 'path to config file')
@@ -62,7 +62,7 @@ var falog = utils.falog;
  * Pack
  */
 (function() {
-  var ver = Date.now().toString();
+  var ver = program.version || Date.now().toString();
   var tmpDir = path.join(cfg.TEMPS_ROOT || '/tmp', ver);
   var outDir = path.join(cfg.DISTS_ROOT, ver);
 
